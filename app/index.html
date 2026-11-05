@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#000000">
 <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
 <link rel="icon" href="icon-192.png">
-<title>Magnifier</title>
+<title>Proper Useful Magnifier</title>
 <style>
   :root { --hi:#f2b84b; --fg:#f3f0ea; --glass:rgba(10,10,12,.55); --b:58px; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; }
@@ -28,6 +28,10 @@
   #zone { position:fixed; left:50%; top:46%; width:min(62vw, 62vh); aspect-ratio:1; transform:translate(-50%,-50%); border-radius:50%;
           border:2px dashed rgba(255,255,255,.28); pointer-events:none; display:none; }
   body.mf #zone { display:block; }
+  /* a mock lens focus ring, just bigger than the screen so only its arcs across the corners show; it turns with a twist */
+  #fring { position:fixed; left:50%; top:50%; border-radius:50%; pointer-events:none; opacity:0; transition:opacity .25s; z-index:1;
+           background:repeating-conic-gradient(rgba(255,255,255,.5) 0deg .6deg, transparent .6deg 5deg), rgba(0,0,0,.55); }
+  body.twisting #fring { opacity:1; } body.frozen #fring { opacity:0; }
   #readout { position:fixed; top:calc(14px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); background:var(--glass); padding:4px 12px; border-radius:20px;
              font-size:14px; font-variant-numeric:tabular-nums; pointer-events:none; white-space:nowrap; }
   .corner { position:fixed; top:calc(8px + env(safe-area-inset-top)); display:flex; gap:8px; }
@@ -66,7 +70,8 @@
   .sheet { position:fixed; inset:0; background:#0c0d10; z-index:10; display:none; flex-direction:column; }
   .sheet.open { display:flex; }
   .sheet header { display:flex; align-items:center; gap:10px; padding:calc(10px + env(safe-area-inset-top)) 12px 10px; z-index:2; }
-  .sheet header h2 { flex:1; margin:0; font-size:16px; }
+  .sheet header h2 { flex:1; margin:0; font-size:16px; min-width:0; }
+  #view header { gap:6px; } #view header h2 { font-size:12px; } #view header button { padding:0 10px; }
   .sheet header button { border-radius:12px; width:auto; height:44px; padding:0 14px; }
   .sheet .body { flex:1; overflow:auto; padding:8px 12px 40px; }
   #grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; }
@@ -81,10 +86,14 @@
   .camrow { display:block; width:100%; text-align:left; margin:6px 0; }
   #diag { position:fixed; left:8px; top:64px; margin:0; font-size:11px; background:rgba(0,0,0,.6); padding:6px 8px; border-radius:8px; pointer-events:none; display:none; max-width:70vw; white-space:pre-wrap; }
   body.diag #diag { display:block; }
-  #picks { position:fixed; left:8px; right:8px; bottom:calc(104px + env(safe-area-inset-bottom)); display:none; flex-wrap:wrap; justify-content:center; gap:6px; z-index:3; }
+  #picks { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(100px + env(safe-area-inset-bottom)); display:none; align-items:center; gap:2px;
+           background:rgba(10,10,12,.5); backdrop-filter:blur(8px); border:1px solid rgba(255,255,255,.12); border-radius:24px; padding:3px; z-index:3; }
   body.frozen.stacked #picks { display:flex; }
-  #picks button { width:auto; height:40px; border-radius:20px; padding:0 12px; font-size:14px; }
-  #picks button.save { background:var(--hi); color:#111; border-color:var(--hi); } #picks button.save:disabled { opacity:.7; }
+  #picks button { width:40px; height:40px; background:none; border:none; font-size:24px; line-height:1; }
+  #picks button svg { width:20px; height:20px; }
+  #pSave { background:var(--hi) !important; color:#111; margin-left:4px; } #pSave.done { background:rgba(255,255,255,.15) !important; color:var(--fg); }
+  #pLabel { min-width:86px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:13px; padding:2px 0; }
+  #pDots { display:flex; gap:4px; } #pDots b { width:5px; height:5px; border-radius:50%; background:rgba(255,255,255,.3); } #pDots b.on { background:var(--hi); }
   #msg { position:fixed; left:50%; top:45%; transform:translate(-50%,-50%); background:var(--glass); padding:14px 18px; border-radius:14px; text-align:center; max-width:86%; display:none; z-index:5; }
   #msg button { border-radius:12px; width:auto; height:48px; padding:0 18px; margin-top:10px; background:var(--hi); color:#111; }
 </style>
@@ -92,9 +101,10 @@
 <body>
 <div id="stage"><video id="live" playsinline muted autoplay></video><canvas id="peak"></canvas><canvas id="frozen"></canvas><div id="ring"></div></div>
 <div id="zone"></div>
+<div id="fring"></div>
 <div id="readout"></div>
 <div id="bubble"></div>
-<div id="picks"></div>
+<div id="picks"><button id="pPrev" aria-label="Previous">‹</button><div id="pLabel"><span id="pText"></span><span id="pDots"></span></div><button id="pNext" aria-label="Next">›</button><button id="pSave" aria-label="Save this one"></button></div>
 <pre id="diag"></pre>
 
 <div class="corner" style="left:10px">
@@ -122,12 +132,13 @@
 <div id="msg"><div id="msgText"></div><button id="msgBtn">Start camera</button></div>
 
 <section class="sheet" id="gal"><header><h2>Shots</h2><button data-close>Done</button></header><div class="body"><div id="grid"></div><p id="galEmpty" style="opacity:.6">Nothing yet. The round button freezes the picture and keeps a copy here.</p></div></section>
-<section class="sheet" id="view"><header><button data-close>Back</button><h2></h2><button id="vShare">Share</button><button id="vDel">Delete</button></header>
+<section class="sheet" id="view"><header><button data-close>Back</button><h2></h2><button id="vSave">Save</button><button id="vShare">Share</button><button id="vDel">Delete</button></header>
   <div class="body"><img alt="">
     <div class="ctl"><div class="mini" id="vmini"><div class="fold" style="visibility:hidden"></div><div class="roller"><div class="notch"></div><div class="tag">ZOOM</div></div></div></div>
   </div></section>
 <section class="sheet" id="set"><header><h2>Camera and settings</h2><button data-close>Done</button></header><div class="body">
   <div id="cams"></div>
+  <div class="opt"><div>Save to phone automatically<small>Every shot also goes into the phone's Downloads, not just this app's gallery</small></div><button id="oAuto">Off</button></div>
   <div class="opt"><div>Lift-off filter<small>Ignores the little shift as your thumb comes off a dial after holding still</small></div><button id="oLift">On</button></div>
   <div class="opt"><div>Clicks<small>A small buzz as a dial turns</small></div><button id="oClick">On</button></div>
   <div class="opt"><div>Test the buzz<small id="buzzNote">If you feel nothing, check the phone's Vibration &amp; haptics settings</small></div><button id="buzz">Buzz</button></div>
@@ -136,7 +147,7 @@
   <div class="opt"><div>Focus stacking<small>In manual focus, the shutter takes 5 pictures from 2 cm nearer to 2 cm further, lines them up, and keeps the sharpest parts of each. Then you can flick through them and save any.</small></div><button id="oStack">Off</button></div>
   <div class="opt"><div>Full-resolution photos<small>Takes a proper 12 MP still after freezing. Slower, and may flicker the light.</small></div><button id="oFull">Off</button></div>
   <p style="opacity:.6;font-size:13px">Tap the picture to focus there. Hold on it to focus there by sharpness and lock it in manual. The corner button with the brackets highlights what's in focus (pink). In manual, tap inside the dashed circle to freeze.<br><br>
-  Version 9 (5 Nov). Two fingers: pinch to zoom, twist to focus.<br><br>Some phones only offer web pages one back camera and pick the lens themselves; if yours offers more, they are listed above.</p>
+  Version 10 (5 Nov). Two fingers: pinch to zoom, twist to focus.<br><br>Some phones only offer web pages one back camera and pick the lens themselves; if yours offers more, they are listed above.</p>
 </div></section>
 
 <script>
@@ -438,7 +449,7 @@ function gestures(surface, h) {
   });
   const end = (e, cancel) => {
     pts.delete(e.pointerId);
-    if (pts.size < 2) pinch = null;
+    if (pts.size < 2) { if (pinch) h.pinchEnd?.(); pinch = null; }
     clearTimeout(hold);
     if (!cancel && tap && !tap.moved && !tap.held && e.timeStamp - tap.t < 450 && pts.size === 0) {
       if (h.double && e.timeStamp - lastTap < 320) { h.double(e.clientX, e.clientY); lastTap = 0; }
@@ -450,7 +461,13 @@ function gestures(surface, h) {
   surface.addEventListener('pointercancel', e => end(e, true));
 }
 
-let pinchFrom = 0, tw = {};
+let pinchFrom = 0, tw = {}, ringBase = 0;
+function sizeRing() {
+  const R = Math.max(innerWidth, innerHeight) / 2 * 1.02 + 30, el = $('#fring'), m = `radial-gradient(circle, transparent ${R - 30}px, #000 ${R - 29}px)`;   // inner edge just past the long side, so only the corners show
+  el.style.width = el.style.height = 2 * R + 'px'; el.style.marginLeft = el.style.marginTop = -R + 'px';
+  el.style.webkitMaskImage = el.style.maskImage = m;
+}
+sizeRing(); addEventListener('resize', sizeRing);
 gestures($('#stage'), {
   tap: (x, y) => {
     if (st.manual && inZone(x, y)) return shutter();
@@ -463,11 +480,12 @@ gestures($('#stage'), {
     // Pinch and twist never mix: whichever starts first (5% / 8 degrees) takes the gesture. The other can take over without
     // lifting your fingers, but only if it clearly starts on its own (11 degrees of twist while the pinch is still, or 7% of pinch while the twist is still).
     const dr = Math.log(r / tw.lr), drot = rot - tw.lrot; tw.lr = r; tw.lrot = rot;
-    const startZoom = () => Object.assign(tw, { mode: 'zoom', z0: st.zoom, r0: r, rot });
+    const startZoom = () => { if (tw.mode === 'focus') ringBase += tw.rot - tw.rot0; document.body.classList.remove('twisting'); Object.assign(tw, { mode: 'zoom', z0: st.zoom, r0: r, rot }); };
     const startTwist = () => {
       if (!caps.focusDistance) return;
       if (!st.manual) { st.focusKnown = true; manual(true); }
       sweepId++; Object.assign(tw, { mode: 'focus', D0: 1 / st.focus, rot0: rot, r });
+      document.body.classList.add('twisting');
     };
     if (tw.mode === 'zoom') { if (Math.abs(dr) > 0.002) tw.rot = rot; else if (Math.abs(rot - tw.rot) > 0.2) startTwist(); }
     else if (tw.mode === 'focus') { if (Math.abs(drot) > 0.003) tw.r = r; else if (Math.abs(Math.log(r / tw.r)) > 0.07) startZoom(); }
@@ -482,8 +500,10 @@ gestures($('#stage'), {
       st.focus = clamp(1 / Math.max(tw.D0 + (rot - tw.rot0) / (Math.PI / 2), 0.01), caps.focusDistance.min, caps.focusDistance.max);
       focusDial.spin((1 / st.focus - before) * focusDial.pxPerUnit);
       push(focusC()); readout(); bubble(cm(st.focus, 2));
+      tw.rot = rot; $('#fring').style.transform = `rotate(${ringBase + rot - tw.rot0}rad)`;
     }
   },
+  pinchEnd: () => { if (tw.mode === 'focus') ringBase += tw.rot - tw.rot0; document.body.classList.remove('twisting'); },
   pan: (dx, dy) => { if (isFrozen()) { frozenPZ.x += dx; frozenPZ.y += dy; frozenPZ.draw(); } },
 });
 let vFrom = 1;
@@ -614,11 +634,14 @@ async function stackShot() {
     maxShift = Math.max(maxShift, Math.abs(dx), Math.abs(dy));
     S.fill(0);
     for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const i = y * W + x, l = 4 * L[i] - L[i - 1] - L[i + 1] - L[i - W] - L[i + W]; S[i] = l * l; }
-    boxBlur(S, W, H, 6, tmp);
+    boxBlur(S, W, H, 10, tmp);
+    // the frame you focused on (k = 2) wins unless another is clearly sharper there: stops a sharp background
+    // that lined up well from painting over a subject at a different depth
+    const bias = k === 2 ? 2.2 : 1;
     // output pixel (x, y) comes from (x + dx, y + dy) in this frame
     for (let y = Math.max(0, -dy); y < Math.min(H, H - dy); y++) for (let x = Math.max(0, -dx); x < Math.min(W, W - dx); x++) {
       const i = y * W + x, j = (y + dy) * W + x + dx;
-      if (S[j] > best[i]) { best[i] = S[j]; od[i * 4] = d[j * 4]; od[i * 4 + 1] = d[j * 4 + 1]; od[i * 4 + 2] = d[j * 4 + 2]; od[i * 4 + 3] = 255; }
+      if (S[j] * bias > best[i]) { best[i] = S[j] * bias; od[i * 4] = d[j * 4]; od[i * 4 + 1] = d[j * 4 + 1]; od[i * 4 + 2] = d[j * 4 + 2]; od[i * 4 + 3] = 255; }
     }
     await sleep(0);
   }
@@ -630,26 +653,39 @@ async function stackShot() {
   if (opts.freezeLight && st.torch && isFrozen()) { push({ torch: false }); lightPaused = true; }
 }
 const PICKS = ['Stacked', '−2 cm', '−1 cm', 'Original', '+1 cm', '+2 cm'];
+const ICON_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>';
+const ICON_TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l5 5 9-10"/></svg>';
 function showPicks() {
-  const box = $('#picks'); box.innerHTML = '';
-  PICKS.forEach((label, k) => {
-    const b = document.createElement('button'); b.textContent = label; b.className = k === stackSet.shown ? 'on' : '';
-    b.onclick = () => { stackSet.shown = k; frozen.getContext('2d').putImageData(stackSet.images[k], 0, 0); showPicks(); };
-    box.append(b);
-  });
-  const save = document.createElement('button'); save.className = 'save';
-  const done = stackSet.saved.has(stackSet.shown);
-  save.textContent = done ? 'Saved ✓' : 'Save this one'; save.disabled = done;
-  save.onclick = () => { stackSet.saved.add(stackSet.shown); frozen.toBlob(b => keep(b, frozen.width, frozen.height), 'image/jpeg', 0.92); showPicks(); };
-  box.append(save);
+  const k = stackSet.shown;
+  $('#pText').textContent = PICKS[k];
+  $('#pDots').innerHTML = PICKS.map((_, i) => `<b class="${i === k ? 'on' : ''}"></b>`).join('');
+  const done = stackSet.saved.has(k);
+  $('#pSave').innerHTML = done ? ICON_TICK : ICON_DOWN; $('#pSave').classList.toggle('done', done);
 }
+function pick(k) {
+  if (!stackSet) return;
+  stackSet.shown = (k + PICKS.length) % PICKS.length;
+  frozen.getContext('2d').putImageData(stackSet.images[stackSet.shown], 0, 0); showPicks();
+}
+$('#pPrev').onclick = () => pick(stackSet.shown - 1);
+$('#pNext').onclick = () => pick(stackSet.shown + 1);
+$('#pLabel').onclick = () => pick(stackSet.shown + 1);
+$('#pSave').onclick = () => {
+  if (!stackSet || stackSet.saved.has(stackSet.shown)) return;
+  stackSet.saved.add(stackSet.shown); frozen.toBlob(b => keep(b, frozen.width, frozen.height), 'image/jpeg', 0.92); showPicks();
+};
 
 // shots live in this phone's browser storage (IndexedDB), not on the server
 const db = new Promise((ok, no) => { const r = indexedDB.open('magnifier', 1);
   r.onupgradeneeded = () => r.result.createObjectStore('shots', { keyPath: 'id', autoIncrement: true });
   r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
 async function store(mode, fn) { const d = await db; return new Promise((ok, no) => { const tx = d.transaction('shots', mode); const r = fn(tx.objectStore('shots')); tx.oncomplete = () => ok(r?.result); tx.onerror = () => no(tx.error); }); }
-const keep = (blob, w, h) => store('readwrite', s => s.add({ t: Date.now(), blob, w, h }));
+const fname = t => `magnifier-${new Date(t).toISOString().slice(0, 19).replace(/:/g, '')}.jpg`;
+function download(blob, name) {   // into the phone's Downloads, where the Photos/Files apps find it
+  const a = document.createElement('a'), u = URL.createObjectURL(blob); a.href = u; a.download = name;
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 10000);
+}
+const keep = (blob, w, h) => { const t = Date.now(); if (opts.autoSave) download(blob, fname(t)); return store('readwrite', s => s.add({ t, blob, w, h })); };
 
 let urls = [];
 async function openGallery() {
@@ -673,6 +709,7 @@ function openShot(sh, u) {
   v.classList.add('open'); viewPZ.reset();
 }
 $('#gallery').onclick = openGallery;
+$('#vSave').onclick = () => { if (shown) { download(shown.blob, fname(shown.t)); bubble('Saved to Downloads'); } };
 $('#vDel').onclick = async () => { if (!shown) return; await store('readwrite', s => s.delete(shown.id)); $('#view').classList.remove('open'); openGallery(); };
 $('#vShare').onclick = async () => {
   if (!shown) return;
@@ -708,7 +745,7 @@ function toggleBtn(id, key) {
   const b = $(id), show = () => { b.textContent = opts[key] ? 'On' : 'Off'; b.classList.toggle('on', opts[key]); };
   b.onclick = () => { opts[key] = !opts[key]; saveOpts(); show(); document.body.classList.toggle('diag', !!opts.diag); }; show();
 }
-toggleBtn('#oDiag', 'diag'); toggleBtn('#oStack', 'stack'); toggleBtn('#oFreezeLight', 'freezeLight');
+toggleBtn('#oDiag', 'diag'); toggleBtn('#oAuto', 'autoSave'); toggleBtn('#oStack', 'stack'); toggleBtn('#oFreezeLight', 'freezeLight');
 document.body.classList.toggle('diag', !!opts.diag);
 toggleBtn('#oLift', 'lift'); toggleBtn('#oClick', 'click'); toggleBtn('#oFull', 'full');
 $('#buzz').onclick = () => {
