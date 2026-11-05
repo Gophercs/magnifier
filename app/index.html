@@ -82,6 +82,8 @@
   #view .ctl .mini { display:flex; }
   .opt { display:flex; justify-content:space-between; align-items:center; padding:14px 4px; border-bottom:1px solid #222; gap:12px; }
   .opt small { display:block; opacity:.6; }
+  .opt[hidden] { display:none; }
+  #grid + p + .opt { margin-top:14px; }
   .opt button, .camrow { border-radius:12px; width:auto; height:auto; min-height:48px; padding:8px 14px; flex:none; }
   .camrow { display:block; width:100%; text-align:left; margin:6px 0; }
   #diag { position:fixed; left:8px; top:64px; margin:0; font-size:11px; background:rgba(0,0,0,.6); padding:6px 8px; border-radius:8px; pointer-events:none; display:none; max-width:70vw; white-space:pre-wrap; }
@@ -108,7 +110,8 @@
 <pre id="diag"></pre>
 
 <div class="corner" style="left:10px">
-  <button id="more" title="Camera and settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>
+  <button id="more" title="Camera and settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  <button id="stk" title="Focus stacking"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="12" height="12" rx="1"/><rect x="8" y="8" width="12" height="12" rx="1"/></svg></button>
 </div>
 <div class="corner" style="right:10px">
   <button id="pk" title="Show what's in focus"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/><path d="M8 15l3-6 2 4 1-2 2 4"/></svg></button>
@@ -131,13 +134,18 @@
 
 <div id="msg"><div id="msgText"></div><button id="msgBtn">Start camera</button></div>
 
-<section class="sheet" id="gal"><header><h2>Shots</h2><button data-close>Done</button></header><div class="body"><div id="grid"></div><p id="galEmpty" style="opacity:.6">Nothing yet. The round button freezes the picture and keeps a copy here.</p></div></section>
+<section class="sheet" id="gal"><header><h2>Shots</h2><button data-close>Done</button></header><div class="body"><div id="grid"></div><p id="galEmpty" style="opacity:.6">Nothing yet. The round button freezes the picture and keeps a copy here.</p>
+  <div class="opt"><div>Save to phone automatically<small>New shots also go into the phone's Downloads</small></div><button id="gAuto">Off</button></div>
+  <div class="opt" id="gAllRow"><div>Copy these to the phone<small>Saves every shot here into Downloads. Chrome may ask to allow several downloads.</small></div><button id="gAll">Save all</button></div>
+  <div class="opt install" hidden><div>Install as an app<small>Opens full screen from your home screen and works offline</small></div><button class="installBtn">Install</button></div>
+</div></section>
 <section class="sheet" id="view"><header><button data-close>Back</button><h2></h2><button id="vSave">Save</button><button id="vShare">Share</button><button id="vDel">Delete</button></header>
   <div class="body"><img alt="">
     <div class="ctl"><div class="mini" id="vmini"><div class="fold" style="visibility:hidden"></div><div class="roller"><div class="notch"></div><div class="tag">ZOOM</div></div></div></div>
   </div></section>
 <section class="sheet" id="set"><header><h2>Camera and settings</h2><button data-close>Done</button></header><div class="body">
   <div id="cams"></div>
+  <div class="opt install" hidden><div>Install as an app<small>Opens full screen from your home screen and works offline</small></div><button class="installBtn">Install</button></div>
   <div class="opt"><div>Save to phone automatically<small>Every shot also goes into the phone's Downloads, not just this app's gallery</small></div><button id="oAuto">Off</button></div>
   <div class="opt"><div>Lift-off filter<small>Ignores the little shift as your thumb comes off a dial after holding still</small></div><button id="oLift">On</button></div>
   <div class="opt"><div>Clicks<small>A small buzz as a dial turns</small></div><button id="oClick">On</button></div>
@@ -147,7 +155,7 @@
   <div class="opt"><div>Focus stacking<small>In manual focus, the shutter takes 5 pictures from 2 cm nearer to 2 cm further, lines them up, and keeps the sharpest parts of each. Then you can flick through them and save any.</small></div><button id="oStack">Off</button></div>
   <div class="opt"><div>Full-resolution photos<small>Takes a proper 12 MP still after freezing. Slower, and may flicker the light.</small></div><button id="oFull">Off</button></div>
   <p style="opacity:.6;font-size:13px">Tap the picture to focus there. Hold on it to focus there by sharpness and lock it in manual. The corner button with the brackets highlights what's in focus (pink). In manual, tap inside the dashed circle to freeze.<br><br>
-  Version 10 (5 Nov). Two fingers: pinch to zoom, twist to focus.<br><br>Some phones only offer web pages one back camera and pick the lens themselves; if yours offers more, they are listed above.</p>
+  Version 11 (5 Nov). Two fingers: pinch to zoom, twist to focus.<br><br>Some phones only offer web pages one back camera and pick the lens themselves; if yours offers more, they are listed above.</p>
 </div></section>
 
 <script>
@@ -463,7 +471,7 @@ function gestures(surface, h) {
 
 let pinchFrom = 0, tw = {}, ringBase = 0;
 function sizeRing() {
-  const R = Math.max(innerWidth, innerHeight) / 2 * 1.02 + 30, el = $('#fring'), m = `radial-gradient(circle, transparent ${R - 30}px, #000 ${R - 29}px)`;   // inner edge just past the long side, so only the corners show
+  const R = Math.max(innerWidth, innerHeight) / 2 * 1.02 + 14, el = $('#fring'), m = `radial-gradient(circle, transparent ${R - 14}px, #000 ${R - 13}px)`;   // inner edge just past the long side, so only the corners show
   el.style.width = el.style.height = 2 * R + 'px'; el.style.marginLeft = el.style.marginTop = -R + 'px';
   el.style.webkitMaskImage = el.style.maskImage = m;
 }
@@ -693,6 +701,11 @@ async function openGallery() {
   const shots = (await store('readonly', s => s.getAll())).reverse();
   const g = $('#grid'); g.innerHTML = '';
   $('#galEmpty').style.display = shots.length ? 'none' : 'block';
+  $('#gAllRow').hidden = !shots.length; $('#gAll').textContent = `Save all ${shots.length}`;
+  $('#gAll').onclick = async () => {
+    for (const sh of shots) { download(sh.blob, fname(sh.t)); await sleep(350); }
+    bubble(`${shots.length} saved to Downloads`, 1600);
+  };
   for (const sh of shots) {
     const u = URL.createObjectURL(sh.blob); urls.push(u);
     const img = new Image(); img.src = u; img.loading = 'lazy'; img.onclick = () => openShot(sh, u);
@@ -741,11 +754,15 @@ document.addEventListener('fullscreenchange', () => {
 });
 
 // ---------- settings ----------
-function toggleBtn(id, key) {
-  const b = $(id), show = () => { b.textContent = opts[key] ? 'On' : 'Off'; b.classList.toggle('on', opts[key]); };
-  b.onclick = () => { opts[key] = !opts[key]; saveOpts(); show(); document.body.classList.toggle('diag', !!opts.diag); }; show();
+const shows = [];
+function refreshOpts() { shows.forEach(f => f()); document.body.classList.toggle('diag', !!opts.diag); }
+function toggleBtn(id, key, icon) {
+  const b = $(id), show = () => { if (!icon) b.textContent = opts[key] ? 'On' : 'Off'; b.classList.toggle('on', !!opts[key]); };
+  shows.push(show);
+  b.onclick = () => { opts[key] = !opts[key]; saveOpts(); refreshOpts(); b.dispatchEvent(new Event('changed')); }; show();
 }
-toggleBtn('#oDiag', 'diag'); toggleBtn('#oAuto', 'autoSave'); toggleBtn('#oStack', 'stack'); toggleBtn('#oFreezeLight', 'freezeLight');
+toggleBtn('#oDiag', 'diag'); toggleBtn('#oAuto', 'autoSave'); toggleBtn('#gAuto', 'autoSave'); toggleBtn('#stk', 'stack', true);
+$('#stk').addEventListener('changed', () => bubble(!opts.stack ? 'Focus stacking off' : st.manual ? 'Focus stacking on' : 'Focus stacking on (works in MF)', 1400)); toggleBtn('#oStack', 'stack'); toggleBtn('#oFreezeLight', 'freezeLight');
 document.body.classList.toggle('diag', !!opts.diag);
 toggleBtn('#oLift', 'lift'); toggleBtn('#oClick', 'click'); toggleBtn('#oFull', 'full');
 $('#buzz').onclick = () => {
@@ -804,6 +821,14 @@ requestAnimationFrame(peakLoop);
 const showPeak = () => { document.body.classList.toggle('peaking', !!opts.peak); $('#pk').classList.toggle('on', !!opts.peak); };
 $('#pk').onclick = () => { opts.peak = !opts.peak; saveOpts(); showPeak(); };
 showPeak();
+let installEvt = null;
+const showInstall = () => document.querySelectorAll('.install').forEach(el => el.hidden = !installEvt);
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; showInstall(); });   // only fires when it isn't installed yet
+addEventListener('appinstalled', () => { installEvt = null; showInstall(); });
+document.querySelectorAll('.installBtn').forEach(b => b.onclick = async () => {
+  if (!installEvt) return;
+  installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; showInstall();
+});
 document.addEventListener('contextmenu', e => e.preventDefault());   // no 'save image' menu on a long press
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 startCamera();
