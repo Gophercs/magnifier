@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="icon" href="icon-192.png">
+<title>Magnifier</title>
+<style>
+  :root { --hi:#f2b84b; --fg:#f3f0ea; --glass:rgba(10,10,12,.55); --b:58px; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; }
+  html, body { margin:0; height:100%; background:#000; color:var(--fg); font:16px/1.3 system-ui, sans-serif; overflow:hidden; user-select:none; }
+  button { font:inherit; color:var(--fg); background:var(--glass); border:1px solid rgba(255,255,255,.15); border-radius:50%; width:var(--b); height:var(--b);
+           display:grid; place-items:center; padding:0; backdrop-filter:blur(6px); }
+  button.on { background:var(--hi); color:#111; border-color:var(--hi); }
+  button svg { width:26px; height:26px; }
+  #stage { position:fixed; inset:0; touch-action:none; overflow:hidden; }
+  #live { transform-origin:50% 50%; }
+  #live, #frozen { pointer-events:none; -webkit-touch-callout:none; position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  #frozen { display:none; transform-origin:0 0; }
+  #peak { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; pointer-events:none; display:none; }
+  body.peaking #peak { display:block; } body.frozen #peak { display:none; }
+  body.frozen #frozen { display:block; } body.frozen #live { visibility:hidden; }
+  #ring { position:absolute; width:70px; height:70px; margin:-35px 0 0 -35px; border:2px solid var(--hi); border-radius:50%; pointer-events:none; opacity:0; transition:opacity .7s; }
+  #ring.lock { border-width:4px; }
+  /* in manual focus, a big circle in the middle works as the shutter, for when the phone is wedged at an awkward angle */
+  #zone { position:fixed; left:50%; top:46%; width:min(62vw, 62vh); aspect-ratio:1; transform:translate(-50%,-50%); border-radius:50%;
+          border:2px dashed rgba(255,255,255,.28); pointer-events:none; display:none; }
+  body.mf #zone { display:block; }
+  #readout { position:fixed; top:calc(14px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); background:var(--glass); padding:4px 12px; border-radius:20px;
+             font-size:14px; font-variant-numeric:tabular-nums; pointer-events:none; white-space:nowrap; }
+  .corner { position:fixed; top:calc(8px + env(safe-area-inset-top)); display:flex; gap:8px; }
+  .corner button { width:44px; height:44px; } .corner button svg { width:22px; height:22px; }
+  #bar { position:fixed; left:0; right:0; bottom:calc(14px + env(safe-area-inset-bottom)); display:flex; justify-content:space-evenly; align-items:flex-end; pointer-events:none; }
+  #bar > * { pointer-events:auto; }
+  #shutter { width:76px; height:76px; border:4px solid var(--fg); background:rgba(255,255,255,.18); }
+  body.frozen #shutter { background:var(--hi); border-color:var(--hi); }
+  /* frozen: nothing on screen but the picture and the yellow button (visibility, so the button doesn't move) */
+  body.frozen .corner, body.frozen #readout, body.frozen #bar > :not(#shutter), body.frozen #zone, body.frozen #diag { visibility:hidden !important; }
+  @media (orientation: landscape) and (max-height: 600px) {
+    #bar { left:auto; right:calc(12px + env(safe-area-inset-right)); bottom:calc(10px + env(safe-area-inset-bottom)); gap:12px; justify-content:flex-end; }
+    #zone { width:min(52vh, 40vw); left:40%; top:50%; }
+    #bubble { top:18%; left:40%; }
+  }
+  .ctl button.small { font-weight:700; font-size:15px; border-radius:16px; font-variant-numeric:tabular-nums; }
+
+  /* mini thumb dials: two buttons tall, growing up from their button's place; drag works as if the whole roller were under the thumb */
+  .ctl { position:relative; width:var(--b); height:var(--b); touch-action:none; }
+  .ctl button { touch-action:none; }
+  .mini { position:absolute; left:0; bottom:0; width:var(--b); height:calc(var(--b) * 2 + 10px); display:none; flex-direction:column;
+          border-radius:16px; overflow:hidden; border:1px solid rgba(255,255,255,.22); background:#111; }
+  .ctl.open .mini { display:flex; } .ctl.open > button { visibility:hidden; }
+  .mini .fold { height:20px; flex:none; display:grid; place-items:center; background:#2a2e35; font-size:12px; line-height:1; color:#ccc; }
+  .roller { position:relative; flex:1; touch-action:none; background:#222 repeating-linear-gradient(to bottom, #454b55 0 3px, #15171b 3px 12px); }
+  .roller::after { content:""; position:absolute; inset:0; pointer-events:none;
+          background:linear-gradient(to bottom, rgba(0,0,0,.85), rgba(0,0,0,0) 35%, rgba(255,255,255,.07) 50%, rgba(0,0,0,0) 65%, rgba(0,0,0,.85)); }
+  .roller .tag { position:absolute; left:0; right:0; bottom:4px; text-align:center; font-size:11px; font-weight:700; z-index:1; }
+  .roller .notch { position:absolute; left:0; right:0; top:50%; height:2px; background:var(--hi); z-index:1; }
+  .mini.active { border-color:var(--hi); }
+  .mini.snap { box-shadow:0 0 0 3px var(--hi); }
+  #bubble { position:fixed; left:50%; top:24%; transform:translateX(-50%); font-size:30px; font-weight:600; background:var(--glass); padding:6px 14px; border-radius:14px;
+            pointer-events:none; opacity:0; transition:opacity .4s; font-variant-numeric:tabular-nums; max-width:92vw; text-align:center; }
+
+  /* sheets: gallery, viewer, settings */
+  .sheet { position:fixed; inset:0; background:#0c0d10; z-index:10; display:none; flex-direction:column; }
+  .sheet.open { display:flex; }
+  .sheet header { display:flex; align-items:center; gap:10px; padding:calc(10px + env(safe-area-inset-top)) 12px 10px; z-index:2; }
+  .sheet header h2 { flex:1; margin:0; font-size:16px; }
+  .sheet header button { border-radius:12px; width:auto; height:44px; padding:0 14px; }
+  .sheet .body { flex:1; overflow:auto; padding:8px 12px 40px; }
+  #grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; }
+  #grid img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:4px; display:block; }
+  #view .body { padding:0; overflow:hidden; position:relative; touch-action:none; }
+  #view img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; transform-origin:0 0; }
+  #view .ctl { position:absolute; right:14px; bottom:calc(14px + env(safe-area-inset-bottom)); }
+  #view .ctl .mini { display:flex; }
+  .opt { display:flex; justify-content:space-between; align-items:center; padding:14px 4px; border-bottom:1px solid #222; gap:12px; }
+  .opt small { display:block; opacity:.6; }
+  .opt button, .camrow { border-radius:12px; width:auto; height:auto; min-height:48px; padding:8px 14px; flex:none; }
+  .camrow { display:block; width:100%; text-align:left; margin:6px 0; }
+  #diag { position:fixed; left:8px; top:64px; margin:0; font-size:11px; background:rgba(0,0,0,.6); padding:6px 8px; border-radius:8px; pointer-events:none; display:none; max-width:70vw; white-space:pre-wrap; }
+  body.diag #diag { display:block; }
+  #picks { position:fixed; left:8px; right:8px; bottom:calc(104px + env(safe-area-inset-bottom)); display:none; flex-wrap:wrap; justify-content:center; gap:6px; z-index:3; }
+  body.frozen.stacked #picks { display:flex; }
+  #picks button { width:auto; height:40px; border-radius:20px; padding:0 12px; font-size:14px; }
+  #picks button.save { background:var(--hi); color:#111; border-color:var(--hi); } #picks button.save:disabled { opacity:.7; }
+  #msg { position:fixed; left:50%; top:45%; transform:translate(-50%,-50%); background:var(--glass); padding:14px 18px; border-radius:14px; text-align:center; max-width:86%; display:none; z-index:5; }
+  #msg button { border-radius:12px; width:auto; height:48px; padding:0 18px; margin-top:10px; background:var(--hi); color:#111; }
+</style>
+</head>
+<body>
+<div id="stage"><video id="live" playsinline muted autoplay></video><canvas id="peak"></canvas><canvas id="frozen"></canvas><div id="ring"></div></div>
+<div id="zone"></div>
+<div id="readout"></div>
+<div id="bubble"></div>
+<div id="picks"></div>
+<pre id="diag"></pre>
+
+<div class="corner" style="left:10px">
+  <button id="more" title="Camera and settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>
+</div>
+<div class="corner" style="right:10px">
+  <button id="pk" title="Show what's in focus"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/><path d="M8 15l3-6 2 4 1-2 2 4"/></svg></button>
+  <button id="fs" title="Full screen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+</div>
+
+<div id="bar">
+  <button id="gallery" title="Gallery"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></button>
+  <button id="torch" title="Light"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2h8l-2 7h-4z"/><path d="M10 9h4v13h-4z"/></svg></button>
+  <button id="shutter" title="Freeze / photo"></button>
+  <div class="ctl" id="fctl">
+    <button class="small" id="af">AF</button>
+    <div class="mini" id="fmini"><div class="fold">▾ AF</div><div class="roller"><div class="notch"></div><div class="tag">MF</div></div></div>
+  </div>
+  <div class="ctl" id="zctl">
+    <button class="small" id="zbtn">1.0×</button>
+    <div class="mini" id="zmini"><div class="fold">▾</div><div class="roller"><div class="notch"></div><div class="tag">ZOOM</div></div></div>
+  </div>
+</div>
+
+<div id="msg"><div id="msgText"></div><button id="msgBtn">Start camera</button></div>
+
+<section class="sheet" id="gal"><header><h2>Shots</h2><button data-close>Done</button></header><div class="body"><div id="grid"></div><p id="galEmpty" style="opacity:.6">Nothing yet. The round button freezes the picture and keeps a copy here.</p></div></section>
+<section class="sheet" id="view"><header><button data-close>Back</button><h2></h2><button id="vShare">Share</button><button id="vDel">Delete</button></header>
+  <div class="body"><img alt="">
+    <div class="ctl"><div class="mini" id="vmini"><div class="fold" style="visibility:hidden"></div><div class="roller"><div class="notch"></div><div class="tag">ZOOM</div></div></div></div>
+  </div></section>
+<section class="sheet" id="set"><header><h2>Camera and settings</h2><button data-close>Done</button></header><div class="body">
+  <div id="cams"></div>
+  <div class="opt"><div>Lift-off filter<small>Ignores the little shift as your thumb comes off a dial after holding still</small></div><button id="oLift">On</button></div>
+  <div class="opt"><div>Clicks<small>A small buzz as a dial turns</small></div><button id="oClick">On</button></div>
+  <div class="opt"><div>Test the buzz<small id="buzzNote">If you feel nothing, check the phone's Vibration &amp; haptics settings</small></div><button id="buzz">Buzz</button></div>
+  <div class="opt"><div>Camera readings<small>Shows what the camera says it's doing (for tracking down bugs)</small></div><button id="oDiag">Off</button></div>
+  <div class="opt"><div>Light off while frozen<small>Switches the light off when you freeze, and back on when you return to the camera</small></div><button id="oFreezeLight">On</button></div>
+  <div class="opt"><div>Focus stacking<small>In manual focus, the shutter takes 5 pictures from 2 cm nearer to 2 cm further, lines them up, and keeps the sharpest parts of each. Then you can flick through them and save any.</small></div><button id="oStack">Off</button></div>
+  <div class="opt"><div>Full-resolution photos<small>Takes a proper 12 MP still after freezing. Slower, and may flicker the light.</small></div><button id="oFull">Off</button></div>
+  <p style="opacity:.6;font-size:13px">Tap the picture to focus there. Hold on it to focus there by sharpness and lock it in manual. The corner button with the brackets highlights what's in focus (pink). In manual, tap inside the dashed circle to freeze.<br><br>
+  Version 9 (5 Nov). Two fingers: pinch to zoom, twist to focus.<br><br>Some phones only offer web pages one back camera and pick the lens themselves; if yours offers more, they are listed above.</p>
+</div></section>
+
+<script>
+const $ = s => document.querySelector(s);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const video = $('#live'), frozen = $('#frozen');
+const opts = Object.assign({ freezeLight: true, lift: true, click: true, full: false, camera: null }, JSON.parse(localStorage.getItem('mag-opts') || '{}'));
+const saveOpts = () => localStorage.setItem('mag-opts', JSON.stringify(opts));
+let stream = null, track = null, caps = {}, cams = [];
+const st = { zoom: 1, focus: 0.2, manual: false, torch: false };   // what we want the camera to be doing
+const isFrozen = () => document.body.classList.contains('frozen');
+const buzz = ms => { if (navigator.vibrate) navigator.vibrate(ms); };
+
+// ---------- talking to the camera: never more than one request in flight, newest values win ----------
+let want = {}, applying = false;
+const diag = { sent: null, err: null };
+let nudge = 1, refocusT;
+function push(c) {
+  if (st.manual && !('focusMode' in c)) {
+    // the Pixel can drop manual focus when it swaps lenses (zoom) or the light changes; tell it again, and again a moment later.
+    // The tiny alternating nudge stops Chrome treating an unchanged value as nothing to do.
+    Object.assign(c, focusC());
+    clearTimeout(refocusT); refocusT = setTimeout(() => st.manual && push(focusC()), 450);
+  }
+  Object.assign(want, c);
+  if (applying || !track) return;
+  applying = true;
+  (async () => {
+    while (Object.keys(want).length) {
+      const c = want; want = {};
+      try { await track.applyConstraints({ advanced: [c] }); diag.sent = c; }
+      catch (e) {
+        // one unsupported setting sinks the whole request, so try them separately (focus mode and distance stay together)
+        diag.err = `${e.name}: ${e.message} (${JSON.stringify(c)})`;
+        const { focusMode, focusDistance, ...rest } = c, parts = Object.entries(rest).map(([k, v]) => ({ [k]: v }));
+        if (focusMode !== undefined) parts.unshift(focusDistance !== undefined ? { focusMode, focusDistance } : { focusMode });
+        if (parts.length > 1) for (const part of parts) { try { await track?.applyConstraints({ advanced: [part] }); diag.sent = part; } catch {} }
+      }
+    }
+    applying = false;
+  })();
+}
+function focusC() { nudge = -nudge; return st.focusKnown === false ? { focusMode: 'manual' } : { focusMode: 'manual', focusDistance: st.focus + nudge * 1e-4 }; }
+async function settled() { while (applying) await sleep(20); }
+
+async function startCamera() {
+  stopCamera();
+  $('#msg').style.display = 'none';
+  try {
+    const dev = opts.camera ? { deviceId: { exact: opts.camera } } : { facingMode: { ideal: 'environment' } };
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false,
+      video: Object.assign(dev, { width: { ideal: 1920 }, height: { ideal: 1440 }, zoom: true }) });
+  } catch (e) {
+    if (opts.camera) { opts.camera = null; saveOpts(); return startCamera(); }
+    return say(`Couldn't open the camera (${e.name}). ${e.name === 'NotAllowedError' ? 'Allow camera access for this page, then try again.' : ''}`);
+  }
+  track = stream.getVideoTracks()[0];
+  video.srcObject = stream; await video.play().catch(() => {});
+  await sleep(300);
+  caps = track.getCapabilities ? track.getCapabilities() : {};
+  st.zoom = clamp(st.zoom, zmin(), zmax());
+  video.style.transform = !caps.zoom && st.zoom > 1 ? `scale(${st.zoom})` : '';
+  $('#torch').style.visibility = caps.torch ? 'visible' : 'hidden';
+  $('#fctl').style.visibility = caps.focusDistance && caps.focusMode?.includes('manual') ? 'visible' : 'hidden';
+  if (!caps.focusDistance) st.manual = false;
+  const c = {};
+  if (caps.zoom) c.zoom = st.zoom;
+  if (caps.torch && st.torch) c.torch = true;
+  if (st.manual) Object.assign(c, { focusMode: 'manual', focusDistance: st.focus });
+  else if (caps.focusMode?.includes('continuous')) c.focusMode = 'continuous';
+  push(c);
+  showMode(); readout();
+  cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+  wake();
+}
+function stopCamera() { if (stream) stream.getTracks().forEach(t => t.stop()); stream = track = null; }
+function say(text) { $('#msgText').textContent = text; $('#msg').style.display = 'block'; }
+$('#msgBtn').onclick = startCamera;
+
+let lock = null;
+async function wake() { try { if (!lock && 'wakeLock' in navigator) { lock = await navigator.wakeLock.request('screen'); lock.onrelease = () => lock = null; } } catch {} }
+document.addEventListener('visibilitychange', () => {   // let go of the camera while the app is in the background
+  if (document.hidden) { stopCamera(); st.torch = false; $('#torch').classList.remove('on'); }
+  else startCamera();
+});
+
+const zmin = () => caps.zoom?.min ?? 1, zmax = () => caps.zoom?.max ?? 8;
+function setZoom(z) {
+  st.zoom = clamp(z, zmin(), zmax());
+  if (caps.zoom) push({ zoom: st.zoom }); else video.style.transform = st.zoom > 1 ? `scale(${st.zoom})` : '';
+  readout();
+}
+const cm = (m, dp) => `${(m * 100).toFixed(dp)} cm`;
+const zx = z => `${z.toFixed(z < 10 ? 1 : 0)}×`;
+function readout() {
+  const f = !st.manual ? 'auto focus' : st.focusKnown === false ? 'focus locked' : `focus ${cm(st.focus, 1)}`;
+  $('#readout').textContent = [zx(st.zoom), f].filter(Boolean).join('  ·  ');
+  $('#zbtn').textContent = zx(st.zoom);
+}
+let bubbleT;
+function bubble(t, ms = 900) { const b = $('#bubble'); b.textContent = t; b.style.fontSize = t.length > 14 ? '17px' : ''; b.style.opacity = 1; clearTimeout(bubbleT); bubbleT = setTimeout(() => b.style.opacity = 0, ms); }
+
+// ---------- the thumb dial ----------
+// A ridged roller: dragging moves its value in "dial units", geared so a long drag is a small change, faster drags move further.
+// The drag carries on past the edge of the little roller (pointer capture), so it behaves like a full-length dial.
+// Guards: an 8 px dead zone before it engages (so a brushing thumb does nothing), very short flicks are undone,
+// and the lift-off filter: if the thumb had been resting and the value shifts only in the last moment before it lifts, snap back.
+class Dial {
+  constructor(roller, { min, max, get, set, pxPerUnit }) {
+    Object.assign(this, { el: roller, box: roller.closest('.mini'), min, max, get, set, pxPerUnit });
+    this.offset = 0;
+    roller.addEventListener('pointerdown', e => this.down(e));
+    roller.addEventListener('pointermove', e => this.move(e));
+    roller.addEventListener('pointerup', e => this.up(e));
+    roller.addEventListener('pointercancel', e => this.up(e, true));
+  }
+  down(e) {
+    if (this.id != null) return;
+    this.id = e.pointerId; this.el.setPointerCapture(e.pointerId);
+    this.y0 = this.lastY = e.clientY; this.t0 = this.lastT = e.timeStamp;
+    this.u0 = this.get(); this.engaged = false;
+    this.hist = [{ t: e.timeStamp, y: e.clientY, u: this.u0 }];
+    this.rest = { u: this.u0, y: e.clientY, t: e.timeStamp };
+  }
+  move(e) {
+    if (e.pointerId !== this.id) return;
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of (evs.length ? evs : [e])) this.step(ev.clientY, ev.timeStamp);
+  }
+  step(y, t) {
+    if (!this.engaged) {
+      if (Math.abs(y - this.y0) < 8) return;
+      this.engaged = true; this.lastY = y; this.lastT = t; this.box.classList.add('active');
+    }
+    // a still thumb sends no events at all, so a gap since the last one means it was resting there
+    if (t - this.lastT > 100) this.rest = { u: this.get(), y: this.lastY, t };
+    const dy = this.lastY - y, dt = Math.max(1, t - this.lastT);
+    const speed = Math.abs(dy) / dt;                       // px per ms
+    const f = Math.max(0, speed - 0.25), gear = 1 + Math.min(14, f * 4 + f * f * 8);   // slow = fine; fast = much further (about 8× at 1 px/ms)
+    const u = clamp(this.get() + dy / this.pxPerUnit * gear, this.min, this.max);
+    this.set(u);
+    this.lastY = y; this.lastT = t;
+    this.spin(dy);
+    this.hist.push({ t, y, u });
+    while (this.hist.length && this.hist[0].t < t - 400) this.hist.shift();
+    const back = this.hist.find(h => h.t >= t - 120);       // resting = under 4 px of movement in the last 120 ms
+    if (back && t - this.hist[0].t >= 100 && Math.abs(y - back.y) < 4) this.rest = { u, y, t };
+  }
+  spin(dy) {   // roll the ridges with the thumb, and click every couple of ridges
+    const before = Math.floor(this.offset / 24);
+    this.offset += dy;
+    this.el.style.backgroundPositionY = `${-this.offset}px`;
+    if (opts.click && Math.floor(this.offset / 24) !== before) buzz(12);
+  }
+  up(e, cancel) {
+    if (e.pointerId !== this.id) return;
+    this.id = null; this.box.classList.remove('active');
+    if (!this.engaged) return;
+    const t = e.timeStamp;
+    if (cancel || t - this.t0 < 120) { this.set(this.u0); return; }          // a brush, not a turn
+    if (opts.lift && this.rest && t - this.t0 > 350 && t - this.rest.t < 160 && Math.abs(e.clientY - this.rest.y) < 30 && this.get() !== this.rest.u) {
+      this.set(this.rest.u);
+      this.box.classList.add('snap'); setTimeout(() => this.box.classList.remove('snap'), 180);
+    }
+  }
+}
+
+// zoom works in log2 units (each unit doubles it); focus in dioptres (1/metres), which is how sharpness actually changes
+const zoomDial = new Dial($('#zmini .roller'), {
+  min: 0, max: 5, pxPerUnit: 420,
+  get: () => Math.log2(st.zoom),
+  set: u => { setZoom(2 ** u); bubble(`${st.zoom.toFixed(2)}×`); },
+});
+const focusDial = new Dial($('#fmini .roller'), {
+  min: 0, max: 10, pxPerUnit: -360,      // negative: dragging up pushes focus further away, down brings it nearer
+  get: () => 1 / st.focus,
+  set: u => { const lo = caps.focusDistance?.min || 0.1, hi = caps.focusDistance?.max || 5;
+              sweepId++; st.focus = clamp(1 / Math.max(u, 0.01), lo, hi); st.focusKnown = true; push(focusC()); readout(); bubble(cm(st.focus, 2)); },
+});
+// pressing a folded button opens its dial and hands it the same touch, so you can press and drag in one go
+$('#zbtn').addEventListener('pointerdown', e => { $('#zctl').classList.add('open'); zoomDial.down(e); });
+$('#zmini .fold').onclick = () => $('#zctl').classList.remove('open');
+
+// ---------- focus mode: AF button opens the manual dial; folding the dial goes back to AF ----------
+function showMode() {
+  document.body.classList.toggle('mf', st.manual);
+  $('#fctl').classList.toggle('open', st.manual);
+}
+function manual(on) {
+  st.manual = on;
+  if (on) push(focusC());
+  else { push({ focusMode: caps.focusMode?.includes('continuous') ? 'continuous' : 'single-shot' }); $('#ring').classList.remove('lock'); }
+  showMode(); readout();
+}
+$('#af').addEventListener('pointerdown', e => {   // MF starts from the last manual distance (Chrome won't say where autofocus was)
+  st.focusKnown = true; manual(true); focusDial.down(e);
+});
+$('#fmini .fold').onclick = () => manual(false);
+
+// ---------- sharpness, measured from the picture itself ----------
+// Chrome won't say where autofocus put the lens, so for hold-to-lock the app focuses by itself: it steps the manual focus
+// through its range, measures how sharp the held spot is at each step, and settles on the sharpest. Then the distance is known.
+const work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
+const nextFrame = () => new Promise(r => video.requestVideoFrameCallback ? video.requestVideoFrameCallback(() => r()) : setTimeout(r, 40));
+function sharpnessAt(p) {   // p in 0–1 picture coordinates; mean squared Laplacian of a small square around it
+  const vw = video.videoWidth, vh = video.videoHeight, side = Math.round(Math.min(vw, vh) * 0.12), N = 96;
+  const sx = clamp(p.x * vw - side / 2, 0, vw - side), sy = clamp(p.y * vh - side / 2, 0, vh - side);
+  work.width = work.height = N; wctx.drawImage(video, sx, sy, side, side, 0, 0, N, N);
+  const d = wctx.getImageData(0, 0, N, N).data, L = new Float32Array(N * N);
+  for (let i = 0; i < N * N; i++) L[i] = d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11;
+  let sum = 0;
+  for (let y = 1; y < N - 1; y++) for (let x = 1; x < N - 1; x++) {
+    const i = y * N + x, lap = 4 * L[i] - L[i - 1] - L[i + 1] - L[i - N] - L[i + N]; sum += lap * lap;
+  }
+  return sum / ((N - 2) * (N - 2));
+}
+let sweepId = 0;
+async function lockFocusAt(cx, cy) {
+  if (!caps.focusDistance) return;
+  const id = ++sweepId, p = pointIn(cx, cy);
+  buzz(25); showRing(cx, cy, true); bubble('Focusing…', 6000);
+  st.manual = true; st.focusKnown = true; showMode();
+  const Dnear = 1 / caps.focusDistance.min, Dfar = 1 / caps.focusDistance.max;
+  const at = async D => { st.focus = 1 / D; push(focusC()); readout(); await settled(); await sleep(80); await nextFrame(); await nextFrame(); return sharpnessAt(p); };
+  const search = async (from, to, n) => {
+    let best = from, bestS = -1;
+    for (let k = 0; k < n; k++) {
+      const D = from + (to - from) * k / (n - 1), sh = await at(D);
+      if (id !== sweepId) return null;                    // the dial was turned, or another hold started: stop
+      if (sh > bestS) { bestS = sh; best = D; }
+    }
+    return best;
+  };
+  const coarse = (Dnear - Dfar) / 11;
+  let D = await search(Dnear, Dfar, 12);                  // near first, since a magnifier is mostly used close up
+  if (D == null) return;
+  D = await search(Math.min(Dnear, D + coarse), Math.max(Dfar, D - coarse), 7);
+  if (D == null) return;
+  st.focus = 1 / D; push(focusC()); readout();
+  bubble(`Locked · ${cm(st.focus, 2)}`, 1800);
+}
+
+// ---------- light ----------
+$('#torch').onclick = () => {
+  st.torch = !st.torch; lightPaused = false; push({ torch: st.torch });
+  $('#torch').classList.toggle('on', st.torch);
+};
+
+// ---------- pan and zoom for still pictures (the frozen frame and the gallery viewer) ----------
+class PanZoom {
+  constructor(el, frame) { this.el = el; this.frame = frame; this.reset(); }
+  reset() { this.s = 1; this.x = 0; this.y = 0; this.draw(); }
+  draw() {
+    const r = this.frame.getBoundingClientRect();
+    this.x = clamp(this.x, r.width * (1 - this.s), 0); this.y = clamp(this.y, r.height * (1 - this.s), 0);
+    this.el.style.transform = `translate(${this.x}px, ${this.y}px) scale(${this.s})`;
+  }
+  zoomTo(s, cx, cy) {   // cx, cy in screen px: that point stays put
+    const r = this.frame.getBoundingClientRect(); cx -= r.left; cy -= r.top;
+    s = clamp(s, 1, 16);
+    this.x = cx - (cx - this.x) * (s / this.s); this.y = cy - (cy - this.y) * (s / this.s); this.s = s; this.draw();
+  }
+  centre() { const r = this.frame.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }
+}
+const frozenPZ = new PanZoom(frozen, $('#stage'));
+const frozenReset = () => { frozenPZ.reset(); if (!caps.zoom && st.zoom > 1) frozenPZ.zoomTo(st.zoom, ...frozenPZ.centre()); };
+const viewPZ = new PanZoom($('#view img'), $('#view .body'));
+new Dial($('#vmini .roller'), {
+  min: 0, max: 4, pxPerUnit: 300,
+  get: () => Math.log2(viewPZ.s),
+  set: u => { viewPZ.zoomTo(2 ** u, ...viewPZ.centre()); bubble(`${viewPZ.s.toFixed(2)}×`); },
+});
+
+// one handler for touches on a picture: tap, long press, pinch and pan; what they do depends on where we are
+function gestures(surface, h) {
+  const pts = new Map(); let pinch = null, tap = null, hold = null, lastTap = 0;
+  surface.addEventListener('pointerdown', e => {
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 1) {
+      tap = { x: e.clientX, y: e.clientY, t: e.timeStamp, moved: false, px: 0, py: 0 };
+      clearTimeout(hold); hold = h.hold && setTimeout(() => { if (tap && !tap.moved && pts.size === 1) { tap.held = true; h.hold(tap.x, tap.y); } }, 550);
+    }
+    if (pts.size === 2) { tap = null; clearTimeout(hold); const [a, b] = [...pts.values()];
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), ang: Math.atan2(b.y - a.y, b.x - a.x), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 }; h.pinchStart?.(); }
+  });
+  surface.addEventListener('pointermove', e => {
+    if (!pts.has(e.pointerId)) return;
+    const prev = pts.get(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && pts.size >= 2) {
+      const [a, b] = [...pts.values()];
+      let rot = Math.atan2(b.y - a.y, b.x - a.x) - pinch.ang;          // radians, clockwise positive
+      rot = Math.atan2(Math.sin(rot), Math.cos(rot));
+      h.pinch?.(Math.hypot(a.x - b.x, a.y - b.y) / pinch.d, (a.x + b.x) / 2, (a.y + b.y) / 2, rot);
+    } else if (tap) {
+      if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 10) { tap.moved = true; clearTimeout(hold); }
+      if (tap.moved) h.pan?.(e.clientX - prev.x, e.clientY - prev.y);
+    }
+  });
+  const end = (e, cancel) => {
+    pts.delete(e.pointerId);
+    if (pts.size < 2) pinch = null;
+    clearTimeout(hold);
+    if (!cancel && tap && !tap.moved && !tap.held && e.timeStamp - tap.t < 450 && pts.size === 0) {
+      if (h.double && e.timeStamp - lastTap < 320) { h.double(e.clientX, e.clientY); lastTap = 0; }
+      else { lastTap = e.timeStamp; h.tap?.(e.clientX, e.clientY); }
+    }
+    if (pts.size === 0) tap = null;
+  };
+  surface.addEventListener('pointerup', e => end(e));
+  surface.addEventListener('pointercancel', e => end(e, true));
+}
+
+let pinchFrom = 0, tw = {};
+gestures($('#stage'), {
+  tap: (x, y) => {
+    if (st.manual && inZone(x, y)) return shutter();
+    if (!isFrozen()) tapFocus(x, y);
+  },
+  hold: (x, y) => { if (!isFrozen() && caps.focusDistance) lockFocusAt(x, y); },
+  pinchStart: () => { pinchFrom = frozenPZ.s; tw = { mode: null, lr: 1, lrot: 0 }; },
+  pinch: (r, cx, cy, rot) => {
+    if (isFrozen()) return frozenPZ.zoomTo(pinchFrom * r, cx, cy);
+    // Pinch and twist never mix: whichever starts first (5% / 8 degrees) takes the gesture. The other can take over without
+    // lifting your fingers, but only if it clearly starts on its own (11 degrees of twist while the pinch is still, or 7% of pinch while the twist is still).
+    const dr = Math.log(r / tw.lr), drot = rot - tw.lrot; tw.lr = r; tw.lrot = rot;
+    const startZoom = () => Object.assign(tw, { mode: 'zoom', z0: st.zoom, r0: r, rot });
+    const startTwist = () => {
+      if (!caps.focusDistance) return;
+      if (!st.manual) { st.focusKnown = true; manual(true); }
+      sweepId++; Object.assign(tw, { mode: 'focus', D0: 1 / st.focus, rot0: rot, r });
+    };
+    if (tw.mode === 'zoom') { if (Math.abs(dr) > 0.002) tw.rot = rot; else if (Math.abs(rot - tw.rot) > 0.2) startTwist(); }
+    else if (tw.mode === 'focus') { if (Math.abs(drot) > 0.003) tw.r = r; else if (Math.abs(Math.log(r / tw.r)) > 0.07) startZoom(); }
+    else if (Math.abs(Math.log(r)) > 0.05) startZoom();
+    else if (Math.abs(rot) > 0.14) startTwist();
+    if (tw.mode === 'zoom') {
+      const before = st.zoom; setZoom(tw.z0 * r / tw.r0);
+      zoomDial.spin(Math.log2(st.zoom / before) * zoomDial.pxPerUnit);
+    } else if (tw.mode === 'focus') {
+      // a quarter turn clockwise = 1 dioptre nearer (about 18 to 15 cm at close range)
+      const before = 1 / st.focus;
+      st.focus = clamp(1 / Math.max(tw.D0 + (rot - tw.rot0) / (Math.PI / 2), 0.01), caps.focusDistance.min, caps.focusDistance.max);
+      focusDial.spin((1 / st.focus - before) * focusDial.pxPerUnit);
+      push(focusC()); readout(); bubble(cm(st.focus, 2));
+    }
+  },
+  pan: (dx, dy) => { if (isFrozen()) { frozenPZ.x += dx; frozenPZ.y += dy; frozenPZ.draw(); } },
+});
+let vFrom = 1;
+gestures($('#view .body'), {
+  double: (x, y) => viewPZ.zoomTo(viewPZ.s > 1.5 ? 1 : 4, x, y),
+  pinchStart: () => { vFrom = viewPZ.s; },
+  pinch: (r, cx, cy) => viewPZ.zoomTo(vFrom * r, cx, cy),
+  pan: (dx, dy) => { viewPZ.x += dx; viewPZ.y += dy; viewPZ.draw(); },
+});
+$('#vmini').addEventListener('pointerdown', e => e.stopPropagation());   // turning the dial isn't a pan
+
+function inZone(x, y) { const r = $('#zone').getBoundingClientRect(); return Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2)) <= r.width / 2; }
+function pointIn(cx, cy) {   // screen point → 0–1 picture coordinates, allowing for the cropping of object-fit: cover
+  const r = video.getBoundingClientRect(), s = Math.max(r.width / video.videoWidth, r.height / video.videoHeight);
+  return { x: clamp((cx - r.left + (video.videoWidth * s - r.width) / 2) / (video.videoWidth * s), 0, 1),
+           y: clamp((cy - r.top + (video.videoHeight * s - r.height) / 2) / (video.videoHeight * s), 0, 1) };
+}
+let ringT;
+function showRing(cx, cy, locked) {
+  const ring = $('#ring'); ring.style.left = cx + 'px'; ring.style.top = cy + 'px'; ring.classList.toggle('lock', !!locked);
+  ring.style.opacity = 1; clearTimeout(ringT); ringT = setTimeout(() => ring.style.opacity = 0, locked ? 2500 : 900);
+}
+function tapFocus(cx, cy) {
+  if (!track || st.manual) return;
+  showRing(cx, cy);
+  const c = { pointsOfInterest: [pointIn(cx, cy)] };
+  if (caps.focusMode?.includes('single-shot')) c.focusMode = 'single-shot';
+  push(c);
+  // after a moment, go back to continuous so it keeps up if you move
+  if (caps.focusMode?.includes('continuous')) setTimeout(() => { if (!st.manual) push({ focusMode: 'continuous' }); }, 4000);
+}
+
+// ---------- freeze and keep ----------
+let lightPaused = false;
+async function shutter() {
+  if (isFrozen()) {
+    document.body.classList.remove('frozen', 'stacked'); stackSet = null;
+    if (lightPaused && st.torch) push({ torch: true });   // back to the camera: the light comes back if it was on
+    lightPaused = false;
+    return;
+  }
+  if (!video.videoWidth) return;
+  if (opts.stack && st.manual && st.focusKnown !== false && caps.focusDistance) return stackShot();
+  buzz(20);
+  frozen.width = video.videoWidth; frozen.height = video.videoHeight;
+  frozen.getContext('2d').drawImage(video, 0, 0);
+  document.body.classList.add('frozen'); frozenReset();
+  frozen.toBlob(b => keep(b, frozen.width, frozen.height), 'image/jpeg', 0.92);
+  const lightOff = () => { if (opts.freezeLight && st.torch && isFrozen()) { push({ torch: false }); lightPaused = true; } };
+  if (!opts.full) lightOff();                              // with full-size photos, the light waits until the photo is taken
+  if (opts.full && 'ImageCapture' in window && track) {
+    try {
+      const ic = new ImageCapture(track), pc = await ic.getPhotoCapabilities();
+      const blob = await ic.takePhoto({ imageWidth: pc.imageWidth.max, imageHeight: pc.imageHeight.max, fillLightMode: 'off' });
+      const bmp = await createImageBitmap(blob);
+      keep(blob, bmp.width, bmp.height);
+      if (st.torch) push({ torch: true });             // the still can switch the light off
+      bubble('12 MP saved');
+    } catch (e) { bubble('Full-size photo failed'); }
+    lightOff();
+  }
+}
+$('#shutter').onclick = shutter;
+
+// focus stacking: five frames through ±2 cm, then each pixel taken from whichever frame is sharpest around it
+function boxBlur(a, w, h, r, tmp) {   // separable running-sum blur, in place
+  for (let y = 0; y < h; y++) { let s = 0; const o = y * w;
+    for (let x = -r; x < w; x++) { if (x + r < w) s += a[o + x + r]; if (x - r - 1 >= 0) s -= a[o + x - r - 1]; if (x >= 0) tmp[o + x] = s; } }
+  for (let x = 0; x < w; x++) { let s = 0;
+    for (let y = -r; y < h; y++) { if (y + r < h) s += tmp[(y + r) * w + x]; if (y - r - 1 >= 0) s -= tmp[(y - r - 1) * w + x]; if (y >= 0) a[y * w + x] = s; } }
+}
+// lining frames up: compare blurred, shrunken copies (where focus differences hardly matter), coarse to fine
+function lumOf(f) { const d = f.data, n = f.width * f.height, L = new Float32Array(n); for (let i = 0; i < n; i++) L[i] = d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11; return L; }
+function pyramid(L, w, h) {
+  const p = [[L, w, h]];
+  for (let k = 0; k < 3; k++) {
+    const [a, aw, ah] = p[p.length - 1], w2 = aw >> 1, h2 = ah >> 1, o = new Float32Array(w2 * h2);
+    for (let y = 0; y < h2; y++) for (let x = 0; x < w2; x++) { const i = 2 * y * aw + 2 * x; o[y * w2 + x] = (a[i] + a[i + 1] + a[i + aw] + a[i + aw + 1]) / 4; }
+    p.push([o, w2, h2]);
+  }
+  return p;
+}
+function diff(a, b, w, h, dx, dy, step) {   // mean absolute difference over the middle, ignoring a brightness offset
+  const mx = Math.floor(w * 0.2), my = Math.floor(h * 0.2);
+  let sa = 0, sb = 0, n = 0;
+  for (let y = my; y < h - my; y += step) for (let x = mx; x < w - mx; x += step) { sa += a[y * w + x]; sb += b[(y + dy) * w + x + dx]; n++; }
+  const off = (sb - sa) / n; let s = 0;
+  for (let y = my; y < h - my; y += step) for (let x = mx; x < w - mx; x += step) s += Math.abs(a[y * w + x] - b[(y + dy) * w + x + dx] + off);
+  return s / n;
+}
+function align(refP, imgP) {
+  let dx = 0, dy = 0;
+  for (let lev = 3; lev >= 0; lev--) {
+    if (lev < 3) { dx *= 2; dy *= 2; }
+    const [a, w, h] = refP[lev], b = imgP[lev][0], R = lev === 3 ? 10 : 2;
+    let best = Infinity, bx = dx, by = dy;
+    for (let j = -R; j <= R; j++) for (let i = -R; i <= R; i++) {
+      const e = diff(a, b, w, h, dx + i, dy + j, lev === 0 ? 3 : 1);
+      if (e < best) { best = e; bx = dx + i; by = dy + j; }
+    }
+    dx = bx; dy = by;
+  }
+  return { dx, dy };
+}
+let stackSet = null;
+async function stackShot() {
+  const W = video.videoWidth, H = video.videoHeight, d0 = st.focus, id = ++sweepId;
+  const lo = caps.focusDistance.min, hi = caps.focusDistance.max;
+  frozen.width = W; frozen.height = H; const fc = frozen.getContext('2d', { willReadFrequently: true });
+  fc.drawImage(video, 0, 0); document.body.classList.add('frozen'); frozenReset();
+  bubble('Hold still…', 8000); buzz(20);
+  const frames = [], offs = [-2, -1, 0, 1, 2];
+  for (const o of offs) {
+    st.focus = clamp(d0 + o / 100, lo, hi); push(focusC());
+    await settled(); await sleep(80); await nextFrame(); await nextFrame();
+    if (id !== sweepId) { st.focus = d0; push(focusC()); return; }
+    fc.drawImage(video, 0, 0); frames.push(fc.getImageData(0, 0, W, H));
+  }
+  st.focus = d0; push(focusC());
+  buzz(20); bubble('Lining up and stacking…', 15000); await sleep(30);
+  const N = W * H, best = new Float32Array(N).fill(-1), S = new Float32Array(N), tmp = new Float32Array(N);
+  const out = new ImageData(W, H), od = out.data;
+  const refL = lumOf(frames[2]), refP = pyramid(refL, W, H);
+  let maxShift = 0;
+  for (let k = 0; k < frames.length; k++) {
+    const d = frames[k].data, L = k === 2 ? refL : lumOf(frames[k]);
+    const { dx, dy } = k === 2 ? { dx: 0, dy: 0 } : align(refP, pyramid(L, W, H));
+    maxShift = Math.max(maxShift, Math.abs(dx), Math.abs(dy));
+    S.fill(0);
+    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const i = y * W + x, l = 4 * L[i] - L[i - 1] - L[i + 1] - L[i - W] - L[i + W]; S[i] = l * l; }
+    boxBlur(S, W, H, 6, tmp);
+    // output pixel (x, y) comes from (x + dx, y + dy) in this frame
+    for (let y = Math.max(0, -dy); y < Math.min(H, H - dy); y++) for (let x = Math.max(0, -dx); x < Math.min(W, W - dx); x++) {
+      const i = y * W + x, j = (y + dy) * W + x + dx;
+      if (S[j] > best[i]) { best[i] = S[j]; od[i * 4] = d[j * 4]; od[i * 4 + 1] = d[j * 4 + 1]; od[i * 4 + 2] = d[j * 4 + 2]; od[i * 4 + 3] = 255; }
+    }
+    await sleep(0);
+  }
+  fc.putImageData(out, 0, 0);
+  frozen.toBlob(b => keep(b, W, H), 'image/jpeg', 0.92);
+  stackSet = { images: [out, ...frames], shown: 0, saved: new Set([0]) };
+  document.body.classList.add('stacked'); showPicks();
+  bubble(`Stacked · moved up to ${maxShift} px to line up`, 2200);
+  if (opts.freezeLight && st.torch && isFrozen()) { push({ torch: false }); lightPaused = true; }
+}
+const PICKS = ['Stacked', '−2 cm', '−1 cm', 'Original', '+1 cm', '+2 cm'];
+function showPicks() {
+  const box = $('#picks'); box.innerHTML = '';
+  PICKS.forEach((label, k) => {
+    const b = document.createElement('button'); b.textContent = label; b.className = k === stackSet.shown ? 'on' : '';
+    b.onclick = () => { stackSet.shown = k; frozen.getContext('2d').putImageData(stackSet.images[k], 0, 0); showPicks(); };
+    box.append(b);
+  });
+  const save = document.createElement('button'); save.className = 'save';
+  const done = stackSet.saved.has(stackSet.shown);
+  save.textContent = done ? 'Saved ✓' : 'Save this one'; save.disabled = done;
+  save.onclick = () => { stackSet.saved.add(stackSet.shown); frozen.toBlob(b => keep(b, frozen.width, frozen.height), 'image/jpeg', 0.92); showPicks(); };
+  box.append(save);
+}
+
+// shots live in this phone's browser storage (IndexedDB), not on the server
+const db = new Promise((ok, no) => { const r = indexedDB.open('magnifier', 1);
+  r.onupgradeneeded = () => r.result.createObjectStore('shots', { keyPath: 'id', autoIncrement: true });
+  r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+async function store(mode, fn) { const d = await db; return new Promise((ok, no) => { const tx = d.transaction('shots', mode); const r = fn(tx.objectStore('shots')); tx.oncomplete = () => ok(r?.result); tx.onerror = () => no(tx.error); }); }
+const keep = (blob, w, h) => store('readwrite', s => s.add({ t: Date.now(), blob, w, h }));
+
+let urls = [];
+async function openGallery() {
+  urls.forEach(URL.revokeObjectURL); urls = [];
+  const shots = (await store('readonly', s => s.getAll())).reverse();
+  const g = $('#grid'); g.innerHTML = '';
+  $('#galEmpty').style.display = shots.length ? 'none' : 'block';
+  for (const sh of shots) {
+    const u = URL.createObjectURL(sh.blob); urls.push(u);
+    const img = new Image(); img.src = u; img.loading = 'lazy'; img.onclick = () => openShot(sh, u);
+    g.append(img);
+  }
+  $('#gal').classList.add('open');
+}
+let shown = null;
+function openShot(sh, u) {
+  shown = sh;
+  const v = $('#view');
+  v.querySelector('img').src = u;
+  v.querySelector('h2').textContent = `${new Date(sh.t).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${sh.w}×${sh.h}`;
+  v.classList.add('open'); viewPZ.reset();
+}
+$('#gallery').onclick = openGallery;
+$('#vDel').onclick = async () => { if (!shown) return; await store('readwrite', s => s.delete(shown.id)); $('#view').classList.remove('open'); openGallery(); };
+$('#vShare').onclick = async () => {
+  if (!shown) return;
+  const f = new File([shown.blob], `magnifier-${new Date(shown.t).toISOString().slice(0, 19).replace(/:/g, '')}.jpg`, { type: 'image/jpeg' });
+  if (navigator.canShare?.({ files: [f] })) { try { await navigator.share({ files: [f] }); } catch {} }
+  else { const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name; a.click(); }
+};
+document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('.sheet').classList.remove('open'));
+
+// ---------- full screen (in the browser) or rotation lock (installed app, which has no browser bar anyway) ----------
+if (!document.documentElement.requestFullscreen) $('#fs').style.display = 'none';   // iPhone: no full screen for pages
+const installed = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches;
+if (installed) {
+  $('#fs').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M3 9a9 9 0 0 1 3-5M21 15a9 9 0 0 1-3 5"/></svg>';
+  $('#fs').title = 'Lock rotation';
+}
+let rotLocked = false;
+$('#fs').onclick = () => installed ? toggleRot() : document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => bubble('No full screen here'));
+async function toggleRot() {
+  try {
+    if (rotLocked) { screen.orientation.unlock(); rotLocked = false; }
+    else { await screen.orientation.lock(screen.orientation.type.startsWith('portrait') ? 'portrait' : 'landscape'); rotLocked = true; }
+  } catch { bubble('Rotation lock not available'); }
+  $('#fs').classList.toggle('on', rotLocked);
+}
+document.addEventListener('fullscreenchange', () => {
+  $('#fs').classList.toggle('on', !!document.fullscreenElement);
+  if (document.fullscreenElement) screen.orientation?.lock?.(screen.orientation.type.startsWith('portrait') ? 'portrait' : 'landscape').catch(() => {});
+});
+
+// ---------- settings ----------
+function toggleBtn(id, key) {
+  const b = $(id), show = () => { b.textContent = opts[key] ? 'On' : 'Off'; b.classList.toggle('on', opts[key]); };
+  b.onclick = () => { opts[key] = !opts[key]; saveOpts(); show(); document.body.classList.toggle('diag', !!opts.diag); }; show();
+}
+toggleBtn('#oDiag', 'diag'); toggleBtn('#oStack', 'stack'); toggleBtn('#oFreezeLight', 'freezeLight');
+document.body.classList.toggle('diag', !!opts.diag);
+toggleBtn('#oLift', 'lift'); toggleBtn('#oClick', 'click'); toggleBtn('#oFull', 'full');
+$('#buzz').onclick = () => {
+  const ok = navigator.vibrate ? navigator.vibrate([40, 60, 40]) : false;
+  $('#buzzNote').textContent = ok ? 'Sent a buzz. Felt nothing? Check Vibration & haptics (touch feedback) in the phone\'s settings.' : 'This browser won\'t vibrate.';
+};
+$('#more').onclick = () => {
+  const box = $('#cams'), cur = track?.getSettings().deviceId; box.innerHTML = '';
+  cams.forEach((d, i) => {
+    const b = document.createElement('button'); b.className = 'camrow' + (d.deviceId === cur ? ' on' : '');
+    b.textContent = d.label || `Camera ${i + 1}`;
+    b.onclick = () => { opts.camera = d.deviceId; saveOpts(); $('#set').classList.remove('open'); st.torch = false; $('#torch').classList.remove('on'); startCamera(); };
+    box.append(b);
+  });
+  $('#set').classList.add('open');
+};
+
+setInterval(() => {
+  if (!opts.diag || !track) return;
+  const g = track.getSettings();
+  $('#diag').textContent = `camera says: ${g.focusMode} · focusDistance ${g.focusDistance} · zoom ${g.zoom} · torch ${g.torch}
+we want: ${st.manual ? 'manual ' + (st.focusKnown === false ? '(unknown)' : st.focus.toFixed(4)) : 'auto'}
+last sent: ${JSON.stringify(diag.sent)}
+last refused: ${diag.err || 'none'}`;
+}, 300);
+// ---------- focus peaking: paint the sharpest edges in the picture ----------
+const peak = $('#peak'), pctx = peak.getContext('2d'), pwork = document.createElement('canvas'), pw = pwork.getContext('2d', { willReadFrequently: true });
+let lastPeak = 0, pImg = null, M = null;
+function peakLoop(t) {
+  requestAnimationFrame(peakLoop);
+  if (!opts.peak || isFrozen() || !video.videoWidth || t - lastPeak < 90) return;
+  lastPeak = t;
+  const W = 480, H = Math.round(W * video.videoHeight / video.videoWidth);
+  if (peak.width !== W || peak.height !== H) { peak.width = pwork.width = W; peak.height = pwork.height = H; pImg = pctx.createImageData(W, H); M = new Float32Array(W * H); }
+  pw.drawImage(video, 0, 0, W, H);
+  const d = pw.getImageData(0, 0, W, H).data, o = pImg.data, hist = new Uint32Array(256);
+  if (!peak.L || peak.L.length !== W * H) peak.L = new Float32Array(W * H);
+  const Lu = peak.L; for (let i = 0; i < W * H; i++) Lu[i] = d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11;
+  const Y = i => Lu[i];
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    const i = y * W + x;
+    const gx = Y(i - W + 1) + 2 * Y(i + 1) + Y(i + W + 1) - Y(i - W - 1) - 2 * Y(i - 1) - Y(i + W - 1);
+    const gy = Y(i + W - 1) + 2 * Y(i + W) + Y(i + W + 1) - Y(i - W - 1) - 2 * Y(i - W) - Y(i - W + 1);
+    const g = Math.abs(gx) + Math.abs(gy), lap = Math.abs(4 * Y(i) - Y(i - 1) - Y(i + 1) - Y(i - W) - Y(i + W));
+    // a sharp edge has a big second derivative for its gradient; a blurred one, however strong, doesn't
+    const m = lap * lap / (g + 16); M[i] = m; hist[Math.min(255, m | 0)]++;
+  }
+  // threshold: the top 2.5% of edges, but never below a floor, so a blurry picture shows nothing
+  let n = 0, cut = 255; const want = W * H * 0.025;
+  while (cut > 0 && n + hist[cut] < want) n += hist[cut--];
+  const thr = Math.max(14, cut);
+  for (let i = 0; i < W * H; i++) { const on = M[i] > thr; o[i * 4] = 255; o[i * 4 + 1] = 40; o[i * 4 + 2] = 220; o[i * 4 + 3] = on ? 255 : 0; }
+  pctx.putImageData(pImg, 0, 0);
+}
+requestAnimationFrame(peakLoop);
+const showPeak = () => { document.body.classList.toggle('peaking', !!opts.peak); $('#pk').classList.toggle('on', !!opts.peak); };
+$('#pk').onclick = () => { opts.peak = !opts.peak; saveOpts(); showPeak(); };
+showPeak();
+document.addEventListener('contextmenu', e => e.preventDefault());   // no 'save image' menu on a long press
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+startCamera();
+</script>
+</body>
+</html>

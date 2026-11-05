@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://gophercs.github.io/magnifier/sitemap.xml
