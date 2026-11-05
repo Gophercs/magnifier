@@ -96,6 +96,11 @@
   #pSave { background:var(--hi) !important; color:#111; margin-left:4px; } #pSave.done { background:rgba(255,255,255,.15) !important; color:var(--fg); }
   #pLabel { min-width:86px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:13px; padding:2px 0; }
   #pDots { display:flex; gap:4px; } #pDots b { width:5px; height:5px; border-radius:50%; background:rgba(255,255,255,.3); } #pDots b.on { background:var(--hi); }
+  #tour { position:fixed; inset:0; width:100%; height:100%; z-index:20; background:rgba(0,0,0,.62); touch-action:none; }
+  #tour text { fill:#fff; font:600 15px system-ui, sans-serif; paint-order:stroke; stroke:#000; stroke-width:4px; stroke-linejoin:round; }
+  #tour text.small { font-weight:400; font-size:13px; fill:#ddd; }
+  #tour .ar { fill:none; stroke:var(--hi); stroke-width:2.5; stroke-linecap:round; }
+  #tour .ar.dash { stroke-dasharray:5 6; stroke-width:2; }
   #msg { position:fixed; left:50%; top:45%; transform:translate(-50%,-50%); background:var(--glass); padding:14px 18px; border-radius:14px; text-align:center; max-width:86%; display:none; z-index:5; }
   #msg button { border-radius:12px; width:auto; height:48px; padding:0 18px; margin-top:10px; background:var(--hi); color:#111; }
 </style>
@@ -132,6 +137,7 @@
   </div>
 </div>
 
+<svg id="tour" hidden></svg>
 <div id="msg"><div id="msgText"></div><button id="msgBtn">Start camera</button></div>
 
 <section class="sheet" id="gal"><header><h2>Shots</h2><button data-close>Done</button></header><div class="body"><div id="grid"></div><p id="galEmpty" style="opacity:.6">Nothing yet. The round button freezes the picture and keeps a copy here.</p>
@@ -144,7 +150,7 @@
     <div class="ctl"><div class="mini" id="vmini"><div class="fold" style="visibility:hidden"></div><div class="roller"><div class="notch"></div><div class="tag">ZOOM</div></div></div></div>
   </div></section>
 <section class="sheet" id="set"><header><h2>Camera and settings</h2><button data-close>Done</button></header><div class="body">
-  <div id="cams"></div>
+  <button class="camrow" id="explain" style="text-align:center;background:var(--hi);color:#111;border-color:var(--hi);font-weight:600">Explain features</button>
   <div class="opt install" hidden><div>Install as an app<small>Opens full screen from your home screen and works offline</small></div><button class="installBtn">Install</button></div>
   <div class="opt"><div>Save to phone automatically<small>Every shot also goes into the phone's Downloads, not just this app's gallery</small></div><button id="oAuto">Off</button></div>
   <div class="opt"><div>Lift-off filter<small>Ignores the little shift as your thumb comes off a dial after holding still</small></div><button id="oLift">On</button></div>
@@ -154,8 +160,10 @@
   <div class="opt"><div>Light off while frozen<small>Switches the light off when you freeze, and back on when you return to the camera</small></div><button id="oFreezeLight">On</button></div>
   <div class="opt"><div>Focus stacking<small>In manual focus, the shutter takes 5 pictures from 2 cm nearer to 2 cm further, lines them up, and keeps the sharpest parts of each. Then you can flick through them and save any.</small></div><button id="oStack">Off</button></div>
   <div class="opt"><div>Full-resolution photos<small>Takes a proper 12 MP still after freezing. Slower, and may flicker the light.</small></div><button id="oFull">Off</button></div>
+  <h3 style="margin:18px 4px 4px;font-size:15px">Camera</h3>
+  <div id="cams"></div>
   <p style="opacity:.6;font-size:13px">Tap the picture to focus there. Hold on it to focus there by sharpness and lock it in manual. The corner button with the brackets highlights what's in focus (pink). In manual, tap inside the dashed circle to freeze.<br><br>
-  Version 11 (5 Nov). Two fingers: pinch to zoom, twist to focus.<br><br>Some phones only offer web pages one back camera and pick the lens themselves; if yours offers more, they are listed above.</p>
+  Version 12 (5 Nov). Two fingers: pinch to zoom, twist to focus.<br><br>Some phones only offer web pages one back camera and pick the lens themselves; if yours offers more, they are listed above.</p>
 </div></section>
 
 <script>
@@ -735,10 +743,7 @@ document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.close
 // ---------- full screen (in the browser) or rotation lock (installed app, which has no browser bar anyway) ----------
 if (!document.documentElement.requestFullscreen) $('#fs').style.display = 'none';   // iPhone: no full screen for pages
 const installed = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches;
-if (installed) {
-  $('#fs').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M3 9a9 9 0 0 1 3-5M21 15a9 9 0 0 1-3 5"/></svg>';
-  $('#fs').title = 'Lock rotation';
-}
+if (installed) $('#fs').style.display = 'none';   // already full screen; Chrome won't lock rotation from here anyway
 let rotLocked = false;
 $('#fs').onclick = () => installed ? toggleRot() : document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => bubble('No full screen here'));
 async function toggleRot() {
@@ -829,6 +834,61 @@ document.querySelectorAll('.installBtn').forEach(b => b.onclick = async () => {
   if (!installEvt) return;
   installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; showInstall();
 });
+function tour() {
+  const svg = $('#tour'), W = innerWidth, H = innerHeight, NS = 'http://www.w3.org/2000/svg';
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = '<defs><marker id="ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#f2b84b"/></marker></defs>';
+  const el = (tag, at, txt) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); if (txt) e.textContent = txt; svg.append(e); return e; };
+  const arrow = (x1, y1, x2, y2, bend = 0, dash) => {   // a gently curved arrow
+    const mx = (x1 + x2) / 2 - (y2 - y1) * bend, my = (y1 + y2) / 2 + (x2 - x1) * bend;
+    el('path', { d: `M${x1} ${y1}Q${mx} ${my} ${x2} ${y2}`, class: 'ar' + (dash ? ' dash' : ''), 'marker-end': 'url(#ah)' });
+  };
+  const label = (x, y, t, anchor = 'middle', cls) => el('text', { x, y, 'text-anchor': anchor, class: cls || '' }, t);
+  const box = sel => { const n = $(sel); if (!n || n.offsetParent === null && getComputedStyle(n).position !== 'fixed' || getComputedStyle(n).visibility === 'hidden' || getComputedStyle(n).display === 'none') return null; const r = n.getBoundingClientRect(); return r.width ? r : null; };
+  const anchorFor = x => x < W * 0.3 ? 'start' : x > W * 0.7 ? 'end' : 'middle';
+  const clampX = x => Math.min(W - 10, Math.max(10, x));
+  // top corners
+  const stk = box('#stk'), pk = box('#pk'), gear = box('#more');
+  if (gear) { label(gear.left, gear.bottom + 34, 'Settings', 'start', 'small'); }
+  if (stk) { const x = stk.left + stk.width / 2; label(stk.left - 4, stk.bottom + 78, 'Focus stacking', 'start'); arrow(stk.left + 30, stk.bottom + 62, x, stk.bottom + 6, 0.2); }
+  if (pk) { const x = pk.left + pk.width / 2; label(W - 10, pk.bottom + 112, 'Focus highlighting', 'end'); arrow(W - 70, pk.bottom + 96, x, pk.bottom + 6, -0.2); }
+  // gestures in the middle
+  const cx = W / 2, ty = H * 0.33, py = H * 0.58, R = Math.min(W, H) * 0.11;
+  const f = box('#fctl'), z = box('#zctl');
+  if (f) {
+    el('path', { d: `M${cx - R} ${ty}A${R} ${R} 0 0 1 ${cx + R * 0.5} ${ty - R * 0.87}`, class: 'ar', 'marker-end': 'url(#ah)' });
+    el('path', { d: `M${cx + R} ${ty}A${R} ${R} 0 0 1 ${cx - R * 0.5} ${ty + R * 0.87}`, class: 'ar', 'marker-end': 'url(#ah)' });
+    el('circle', { cx: cx - R, cy: ty, r: 9, fill: '#fff8' }); el('circle', { cx: cx + R, cy: ty, r: 9, fill: '#fff8' });
+    label(cx, ty + R + 30, 'Twist two fingers to focus');
+  }
+  label(cx, (ty + py) / 2 + 14, 'Tap to focus · hold to lock focus', 'middle', 'small');
+  const d = R * 0.75;
+  arrow(cx - 14, py + 14, cx - d - 14, py + d + 14); arrow(cx + 14, py - 14, cx + d + 14, py - d - 14);
+  el('circle', { cx: cx - 14, cy: py + 14, r: 9, fill: '#fff8' }); el('circle', { cx: cx + 14, cy: py - 14, r: 9, fill: '#fff8' });
+  label(cx, py + R + 34, 'Pinch to zoom');
+  // the bottom bar
+  const lift = (sel, up, t, sub) => {
+    const r = box(sel); if (!r) return null;
+    const x = r.left + r.width / 2, a = anchorFor(x), lx = clampX(a === 'start' ? r.left : a === 'end' ? r.right : x);
+    label(lx, r.top - up, t, a);
+    if (sub) label(lx, r.top - up + 17, sub, a, 'small');
+    arrow(x, r.top - up + (sub ? 25 : 8), x, r.top - 6);
+    return { x, y: r.top - up - 20 };
+  };
+  lift('#gallery', 44, 'Gallery');
+  lift('#torch', 92, 'Torch');
+  lift('#shutter', 44, 'Freeze / photo');
+  const fl = f && lift('#fctl', 150, 'Focus dial', 'press AF and drag');
+  const zl = z && lift('#zctl', 104, 'Zoom dial', 'press and drag');
+  if (fl) arrow(cx + 40, ty + R + 40, fl.x - 10, fl.y - 4, -0.25, true);   // twist ↔ focus dial
+  if (zl) arrow(cx + 50, py + R + 44, zl.x - 6, zl.y - 4, -0.2, true);    // pinch ↔ zoom dial
+  label(cx, H * 0.22, 'Touch anywhere to start', 'middle', 'small');
+  svg.hidden = false;
+  localStorage.setItem('mag-toured', '1');
+}
+$('#tour').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); $('#tour').hidden = true; });
+$('#explain').onclick = () => { $('#set').classList.remove('open'); setTimeout(tour, 150); };
+if (!localStorage.getItem('mag-toured')) setTimeout(() => { if (!$('#msg').offsetParent) tour(); }, 1500);   // first visit
 document.addEventListener('contextmenu', e => e.preventDefault());   // no 'save image' menu on a long press
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 startCamera();
