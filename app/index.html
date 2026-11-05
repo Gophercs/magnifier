@@ -96,11 +96,18 @@
   #pSave { background:var(--hi) !important; color:#111; margin-left:4px; } #pSave.done { background:rgba(255,255,255,.15) !important; color:var(--fg); }
   #pLabel { min-width:86px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:13px; padding:2px 0; }
   #pDots { display:flex; gap:4px; } #pDots b { width:5px; height:5px; border-radius:50%; background:rgba(255,255,255,.3); } #pDots b.on { background:var(--hi); }
-  #tour { position:fixed; inset:0; width:100%; height:100%; z-index:20; background:rgba(0,0,0,.62); touch-action:none; }
-  #tour text { fill:#fff; font:600 15px system-ui, sans-serif; paint-order:stroke; stroke:#000; stroke-width:4px; stroke-linejoin:round; }
-  #tour text.small { font-weight:400; font-size:13px; fill:#ddd; }
-  #tour .ar { fill:none; stroke:var(--hi); stroke-width:2.5; stroke-linecap:round; }
-  #tour .ar.dash { stroke-dasharray:5 6; stroke-width:2; }
+  #tour { position:fixed; inset:0; z-index:20; background:rgba(6,7,9,.72); touch-action:none; display:none; }
+  #tour.open { display:block; animation:tourIn .25s ease-out; }
+  @keyframes tourIn { from { opacity:0; } to { opacity:1; } }
+  #tour svg { width:100%; height:100%; display:block; }
+  #tour text { fill:#fff; font:600 15px system-ui, sans-serif; }
+  #tour text.sub { font-weight:400; font-size:12px; fill:#c9c4ba; }
+  #tour text.title { font-size:22px; font-weight:700; fill:var(--hi); }
+  #tour .pill { fill:rgba(22,24,29,.92); stroke:rgba(255,255,255,.14); }
+  #tour .ar { fill:none; stroke:var(--hi); stroke-width:2.2; stroke-linecap:round; }
+  #tour .ar.dash { stroke-dasharray:2 7; stroke-width:2.6; }
+  #tour .ring { fill:none; stroke:var(--hi); stroke-width:2; opacity:.9; }
+  #tour .tip { fill:rgba(255,255,255,.22); stroke:#fff; stroke-width:1.5; }
   #msg { position:fixed; left:50%; top:45%; transform:translate(-50%,-50%); background:var(--glass); padding:14px 18px; border-radius:14px; text-align:center; max-width:86%; display:none; z-index:5; }
   #msg button { border-radius:12px; width:auto; height:48px; padding:0 18px; margin-top:10px; background:var(--hi); color:#111; }
 </style>
@@ -137,7 +144,7 @@
   </div>
 </div>
 
-<svg id="tour" hidden></svg>
+<div id="tour"><svg></svg></div>
 <div id="msg"><div id="msgText"></div><button id="msgBtn">Start camera</button></div>
 
 <section class="sheet" id="gal"><header><h2>Shots</h2><button data-close>Done</button></header><div class="body"><div id="grid"></div><p id="galEmpty" style="opacity:.6">Nothing yet. The round button freezes the picture and keeps a copy here.</p>
@@ -163,7 +170,7 @@
   <h3 style="margin:18px 4px 4px;font-size:15px">Camera</h3>
   <div id="cams"></div>
   <p style="opacity:.6;font-size:13px">Tap the picture to focus there. Hold on it to focus there by sharpness and lock it in manual. The corner button with the brackets highlights what's in focus (pink). In manual, tap inside the dashed circle to freeze.<br><br>
-  Version 12 (5 Nov). Two fingers: pinch to zoom, twist to focus.<br><br>Some phones only offer web pages one back camera and pick the lens themselves; if yours offers more, they are listed above.</p>
+  Version 13 (5 Nov). Two fingers: pinch to zoom, twist to focus.<br><br>Some phones only offer web pages one back camera and pick the lens themselves; if yours offers more, they are listed above.</p>
 </div></section>
 
 <script>
@@ -835,58 +842,78 @@ document.querySelectorAll('.installBtn').forEach(b => b.onclick = async () => {
   installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; showInstall();
 });
 function tour() {
-  const svg = $('#tour'), W = innerWidth, H = innerHeight, NS = 'http://www.w3.org/2000/svg';
+  const wrap = $('#tour'), svg = wrap.querySelector('svg'), W = innerWidth, H = innerHeight, NS = 'http://www.w3.org/2000/svg';
+  wrap.classList.add('open');                 // shown first, so text can be measured for its pill
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.innerHTML = '<defs><marker id="ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#f2b84b"/></marker></defs>';
-  const el = (tag, at, txt) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); if (txt) e.textContent = txt; svg.append(e); return e; };
-  const arrow = (x1, y1, x2, y2, bend = 0, dash) => {   // a gently curved arrow
-    const mx = (x1 + x2) / 2 - (y2 - y1) * bend, my = (y1 + y2) / 2 + (x2 - x1) * bend;
-    el('path', { d: `M${x1} ${y1}Q${mx} ${my} ${x2} ${y2}`, class: 'ar' + (dash ? ' dash' : ''), 'marker-end': 'url(#ah)' });
+  svg.innerHTML = '<defs><marker id="ah" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#f2b84b"/></marker></defs>';
+  const el = (tag, at, txt, parent = svg) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); if (txt) e.textContent = txt; parent.append(e); return e; };
+  const curve = (x1, y1, cx, cy, x2, y2, dash) => el('path', { d: `M${x1} ${y1}Q${cx} ${cy} ${x2} ${y2}`, class: 'ar' + (dash ? ' dash' : ''), 'marker-end': 'url(#ah)' });
+  const line = (x1, y1, x2, y2) => el('path', { d: `M${x1} ${y1}L${x2} ${y2}`, class: 'ar', 'marker-end': 'url(#ah)' });
+  // a label in a dark pill; anchor is where (x, y) sits: 'start', 'middle' or 'end'. Returns the pill's box.
+  const label = (x, y, t, anchor = 'middle', sub) => {
+    const g = el('g', {}), tt = el('text', { x, y, 'text-anchor': anchor }, t, g);
+    if (sub) el('text', { x, y: y + 16, 'text-anchor': anchor, class: 'sub' }, sub, g);
+    const bb = g.getBBox(), px = 10, py = 6;
+    let left = bb.x - px; const w = bb.width + 2 * px;
+    left = Math.min(W - 6 - w, Math.max(6, left));            // keep the pill on screen
+    const shift = left - (bb.x - px); if (shift) g.setAttribute('transform', `translate(${shift} 0)`);
+    const r = el('rect', { x: left, y: bb.y - py, width: w, height: bb.height + 2 * py, rx: 11, class: 'pill' });
+    svg.insertBefore(r, g);
+    return { left, right: left + w, top: bb.y - py, bottom: bb.y + bb.height + py, cx: left + w / 2 };
   };
-  const label = (x, y, t, anchor = 'middle', cls) => el('text', { x, y, 'text-anchor': anchor, class: cls || '' }, t);
-  const box = sel => { const n = $(sel); if (!n || n.offsetParent === null && getComputedStyle(n).position !== 'fixed' || getComputedStyle(n).visibility === 'hidden' || getComputedStyle(n).display === 'none') return null; const r = n.getBoundingClientRect(); return r.width ? r : null; };
-  const anchorFor = x => x < W * 0.3 ? 'start' : x > W * 0.7 ? 'end' : 'middle';
-  const clampX = x => Math.min(W - 10, Math.max(10, x));
+  const box = sel => { const n = $(sel); if (!n) return null; const cs = getComputedStyle(n);
+    if (cs.display === 'none' || cs.visibility === 'hidden') return null; const r = n.getBoundingClientRect(); return r.width ? r : null; };
+  const ring = r => el('rect', { x: r.left - 4, y: r.top - 4, width: r.width + 8, height: r.height + 8, rx: Math.min(r.width, r.height) / 2 + 4, class: 'ring' });
+  const tip = (x, y) => el('circle', { cx: x, cy: y, r: 11, class: 'tip' });
+  const landscape = W > H;
+
+  // heading
+  const ty0 = landscape ? H * 0.18 : H * 0.25;
+  el('text', { x: W / 2, y: ty0, 'text-anchor': 'middle', class: 'title' }, 'How it works');
+  el('text', { x: W / 2, y: ty0 + 22, 'text-anchor': 'middle', class: 'sub' }, 'Touch anywhere to start');
+
   // top corners
-  const stk = box('#stk'), pk = box('#pk'), gear = box('#more');
-  if (gear) { label(gear.left, gear.bottom + 34, 'Settings', 'start', 'small'); }
-  if (stk) { const x = stk.left + stk.width / 2; label(stk.left - 4, stk.bottom + 78, 'Focus stacking', 'start'); arrow(stk.left + 30, stk.bottom + 62, x, stk.bottom + 6, 0.2); }
-  if (pk) { const x = pk.left + pk.width / 2; label(W - 10, pk.bottom + 112, 'Focus highlighting', 'end'); arrow(W - 70, pk.bottom + 96, x, pk.bottom + 6, -0.2); }
-  // gestures in the middle
-  const cx = W / 2, ty = H * 0.33, py = H * 0.58, R = Math.min(W, H) * 0.11;
-  const f = box('#fctl'), z = box('#zctl');
-  if (f) {
-    el('path', { d: `M${cx - R} ${ty}A${R} ${R} 0 0 1 ${cx + R * 0.5} ${ty - R * 0.87}`, class: 'ar', 'marker-end': 'url(#ah)' });
-    el('path', { d: `M${cx + R} ${ty}A${R} ${R} 0 0 1 ${cx - R * 0.5} ${ty + R * 0.87}`, class: 'ar', 'marker-end': 'url(#ah)' });
-    el('circle', { cx: cx - R, cy: ty, r: 9, fill: '#fff8' }); el('circle', { cx: cx + R, cy: ty, r: 9, fill: '#fff8' });
-    label(cx, ty + R + 30, 'Twist two fingers to focus');
-  }
-  label(cx, (ty + py) / 2 + 14, 'Tap to focus · hold to lock focus', 'middle', 'small');
-  const d = R * 0.75;
-  arrow(cx - 14, py + 14, cx - d - 14, py + d + 14); arrow(cx + 14, py - 14, cx + d + 14, py - d - 14);
-  el('circle', { cx: cx - 14, cy: py + 14, r: 9, fill: '#fff8' }); el('circle', { cx: cx + 14, cy: py - 14, r: 9, fill: '#fff8' });
-  label(cx, py + R + 34, 'Pinch to zoom');
-  // the bottom bar
-  const lift = (sel, up, t, sub) => {
-    const r = box(sel); if (!r) return null;
-    const x = r.left + r.width / 2, a = anchorFor(x), lx = clampX(a === 'start' ? r.left : a === 'end' ? r.right : x);
-    label(lx, r.top - up, t, a);
-    if (sub) label(lx, r.top - up + 17, sub, a, 'small');
-    arrow(x, r.top - up + (sub ? 25 : 8), x, r.top - 6);
-    return { x, y: r.top - up - 20 };
+  const gear = box('#more'), stk = box('#stk'), pk = box('#pk');
+  if (gear) { ring(gear); }
+  if (stk) { ring(stk); const L = label(stk.left - 2, stk.bottom + 58, 'Focus stacking', 'start', 'sharp close-ups, front to back'); line(stk.left + stk.width / 2, L.top - 4, stk.left + stk.width / 2, stk.bottom + 8); }
+  if (gear) label(gear.left - 2, gear.bottom + 26, 'Settings', 'start');
+  if (pk) { ring(pk); const L = label(pk.right + 2, pk.bottom + (landscape ? 58 : 118), 'Focus highlighting', 'end', 'sharp edges glow pink'); line(pk.left + pk.width / 2, L.top - 4, pk.left + pk.width / 2, pk.bottom + 8); }
+
+  // bottom bar: two rows of labels, so arrows run straight down without crossing
+  const bar = {}, under = (sel, up, t, sub, anchor) => {
+    const r = box(sel); if (!r) return null; ring(r);
+    const x = r.left + r.width / 2, L = label(anchor === 'end' ? r.right + 2 : anchor === 'start' ? r.left - 2 : x, r.top - up, t, anchor || 'middle', sub);
+    line(x, L.bottom + 4, x, r.top - 8);
+    return Object.assign(L, { x });
   };
-  lift('#gallery', 44, 'Gallery');
-  lift('#torch', 92, 'Torch');
-  lift('#shutter', 44, 'Freeze / photo');
-  const fl = f && lift('#fctl', 150, 'Focus dial', 'press AF and drag');
-  const zl = z && lift('#zctl', 104, 'Zoom dial', 'press and drag');
-  if (fl) arrow(cx + 40, ty + R + 40, fl.x - 10, fl.y - 4, -0.25, true);   // twist ↔ focus dial
-  if (zl) arrow(cx + 50, py + R + 44, zl.x - 6, zl.y - 4, -0.2, true);    // pinch ↔ zoom dial
-  label(cx, H * 0.22, 'Touch anywhere to start', 'middle', 'small');
-  svg.hidden = false;
+  // landscape is short, so labels sit in alternating rows without the second line
+  const rows = landscape ? [44, 92, 44, 140, 92] : [46, 112, 46, 112, 178];
+  bar.gallery = under('#gallery', rows[0], 'Gallery', null, landscape ? 'middle' : 'start');
+  bar.torch = under('#torch', rows[1], 'Torch');
+  bar.shutter = under('#shutter', rows[2], 'Freeze / photo');
+  bar.focus = under('#fctl', rows[3], 'Focus dial', landscape ? null : 'press AF and drag', 'end');
+  bar.zoom = under('#zctl', rows[4], 'Zoom dial', landscape ? null : 'press and drag', 'end');
+
+  // gestures: pinch above twist; pinch's arrow takes the outside lane to the zoom dial, twist's the inside lane to the focus dial
+  const R = Math.min(W, H) * 0.1;
+  const P = landscape ? { x: W * 0.42, y: H * 0.5 } : { x: W * 0.42, y: H * 0.38 };
+  const T = landscape ? { x: W * 0.16, y: H * 0.5 } : { x: W * 0.42, y: H * 0.57 };
+  const d = R * 0.7;
+  tip(P.x - d * 0.35, P.y + d * 0.35); tip(P.x + d * 0.35, P.y - d * 0.35);
+  line(P.x - d * 0.6, P.y + d * 0.6, P.x - d * 1.3, P.y + d * 1.3); line(P.x + d * 0.6, P.y - d * 0.6, P.x + d * 1.3, P.y - d * 1.3);
+  const PL = label(P.x, P.y + d * 1.3 + 30, 'Pinch to zoom', 'middle', landscape ? 'or the zoom dial' : null);
+  if (box('#fctl')) {
+    el('path', { d: `M${T.x - R} ${T.y}A${R} ${R} 0 0 1 ${T.x + R * 0.5} ${T.y - R * 0.87}`, class: 'ar', 'marker-end': 'url(#ah)' });
+    el('path', { d: `M${T.x + R} ${T.y}A${R} ${R} 0 0 1 ${T.x - R * 0.5} ${T.y + R * 0.87}`, class: 'ar', 'marker-end': 'url(#ah)' });
+    tip(T.x - R, T.y); tip(T.x + R, T.y);
+  }
+  const TL = box('#fctl') ? label(T.x, T.y + R + 34, 'Twist two fingers to focus', 'middle', landscape ? 'or the focus dial · tap to focus · hold to lock' : 'tap to focus · hold to lock focus') : label(T.x, T.y, 'Tap to focus');
+  if (landscape) return localStorage.setItem('mag-toured', '1');   // no long arrows across the bar labels in landscape
+  if (bar.zoom) curve(PL.right + 4, (PL.top + PL.bottom) / 2, bar.zoom.x, (PL.top + PL.bottom) / 2, bar.zoom.x, bar.zoom.top - 6, true);
+  if (bar.focus && box('#fctl')) curve(TL.right + 4, (TL.top + TL.bottom) / 2, bar.focus.x, (TL.top + TL.bottom) / 2, bar.focus.x, bar.focus.top - 6, true);
   localStorage.setItem('mag-toured', '1');
 }
-$('#tour').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); $('#tour').hidden = true; });
+$('#tour').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); $('#tour').classList.remove('open'); });
 $('#explain').onclick = () => { $('#set').classList.remove('open'); setTimeout(tour, 150); };
 if (!localStorage.getItem('mag-toured')) setTimeout(() => { if (!$('#msg').offsetParent) tour(); }, 1500);   // first visit
 document.addEventListener('contextmenu', e => e.preventDefault());   // no 'save image' menu on a long press
